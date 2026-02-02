@@ -1,0 +1,151 @@
+# Obsidian Bases TypeScript Schema
+
+> A complete TypeScript implementation for Obsidian Bases (.base files) including schema definitions, lexer, parser, evaluator, reactive query system, and builder APIs.
+
+## Overview
+
+This package provides a comprehensive TypeScript schema and parser for Obsidian Bases - YAML-based files that define dynamic views of notes in an Obsidian vault. Includes Vue-integrated reactive querying.
+
+## Quick Links
+
+- Documentation: https://help.obsidian.md/bases
+- Syntax Reference: https://help.obsidian.md/bases/syntax
+- Functions: https://help.obsidian.md/bases/functions
+- Formulas: https://help.obsidian.md/formulas
+
+## Installation
+
+Copy the TypeScript files to your project:
+
+```bash
+cp obsidian-bases-schema.ts obsidian-bases-parser.ts obsidian-bases-utils.ts obsidian-bases-reactive.ts index.ts your-project/
+```
+
+## Core Features
+
+1. **Complete TypeScript Schema** - Type definitions for filters, formulas, views, properties, summaries
+2. **Lexer & Parser** - Tokenize and parse filter/formula expressions into AST
+3. **FilterExpObject** - Parsed filters with extracted components (properties, function calls, comparisons)
+4. **Evaluator** - Execute parsed expressions against file/note contexts
+5. **Builder APIs** - Fluent interfaces for creating bases and filters
+6. **Preset Utilities** - Common filter patterns, formulas, and summaries
+7. **YAML Serialization** - Convert base objects to valid YAML
+8. **YAML Parsing** - Read `.base` files from YAML strings
+9. **Reactive Query System** - Vue-integrated reactive querying with `useBaseQuery()` composable
+
+## Quick Start
+
+```typescript
+import { createBase, parseFilterExpression, PresetFilters } from './index';
+
+// Create a base using the builder API
+const myBase = createBase()
+  .withFilters(PresetFilters.byTag('project'))
+  .addFormula('days_old', '((now() - file.ctime) / 86400000).round(0)')
+  .addTableView('Projects', {
+    order: ['file.name', 'status', 'formula.days_old'],
+  })
+  .build();
+
+// Parse a filter and access extracted components
+const parsed = parseFilterExpression('file.hasTag("book") && status == "reading"');
+
+if (parsed.fileMethods.includes('hasTag')) {
+  console.log('Tags:', parsed.referencedTags); // ['book']
+}
+
+if (parsed.noteProperties.includes('status')) {
+  console.log('Uses status property');
+}
+```
+
+## File Structure
+
+```
+obsidian-bases/
+├── index.ts                    # Main exports
+├── obsidian-bases-schema.ts    # Type definitions
+├── obsidian-bases-parser.ts    # Lexer, parser, evaluator
+├── obsidian-bases-utils.ts     # Builders, presets, serialization
+├── obsidian-bases-reactive.ts  # Reactive query system (Vue)
+├── obsidian-bases-example.ts   # Usage examples
+├── llms.txt                    # This file (overview)
+└── llms-full.txt               # Complete documentation
+```
+
+## Key Types
+
+- `ObsidianBase` - Complete base file structure
+- `Filter` / `FilterExpObject` - Filter expressions with parsed components
+- `FilterObject` - Recursive and/or/not filter structure
+- `View` - View configuration (table, cards, list, map)
+- `Formulas` - Formula definitions
+- `Properties` - Property display configurations
+- `Summaries` - Custom summary formulas
+- `BaseSource<T>` - Source data type with optional Obsidian fields + custom data
+- `ReactiveBaseQueryResult<T>` - Query result with items, groups, summaries
+
+## Main Classes
+
+- `BaseBuilder` - Fluent API for creating bases
+- `FilterBuilder` - Fluent API for building filters
+- `Lexer` - Tokenizes expressions
+- `Parser` - Builds AST from tokens
+- `FilterExpressionParser` - Parses filters into FilterExpObject
+- `Evaluator` - Executes expressions against context
+- `Validator` - Validates filter/formula syntax
+- `ReactiveBaseQuery<T>` - Reactive query class with Vue integration
+
+## Vue Composables
+
+- `useBaseQuery()` - Reactive query composable
+- `useBaseView()` - Single view query composable
+
+## Main Functions
+
+- `createBase()` - Create a base builder
+- `createFilter()` - Create a filter builder
+- `parseFilterExpression()` - Parse filter to FilterExpObject
+- `parseFilter()` - Parse filter to AST
+- `parseFormula()` - Parse formula to AST
+- `evaluateFilter()` - Evaluate filter against context
+- `evaluateFormula()` - Evaluate formula against context
+- `validateFilter()` - Validate filter syntax
+- `validateFormula()` - Validate formula syntax
+- `serializeToYAML()` - Convert base to YAML
+- `readBase()` - Parse YAML string to ObsidianBase
+- `createBaseQuery()` - Create a ReactiveBaseQuery instance
+- `createBaseQueryFromYAML()` - Create query from YAML string
+
+## Reactive Query Quick Example
+
+```typescript
+import { ref } from 'vue';
+import { readBase, useBaseView, BaseSource } from './index';
+
+interface Task { title: string; }
+
+const source = ref<BaseSource<Task>[]>([{
+  id: '1',
+  name: 'Task.md',
+  tags: ['task'],
+  properties: { status: 'todo' },
+  data: { title: 'My Task' }
+}]);
+
+const base = readBase(`
+  views:
+    - type: list
+      name: "Tasks"
+      order: [file.name]
+`);
+
+// Reactive results - auto-update when source changes
+const { items: tasks, totalCount } = useBaseView(source, base, 'Tasks');
+
+// In template: v-for="task in tasks" :key="task.id"
+```
+
+## License
+
+MIT

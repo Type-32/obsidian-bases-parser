@@ -1,0 +1,1378 @@
+# Obsidian Bases TypeScript Schema - Complete Documentation
+
+> A comprehensive TypeScript implementation for Obsidian Bases (.base files) including complete schema definitions, lexer, parser, evaluator, and builder APIs.
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Installation](#installation)
+3. [Core Concepts](#core-concepts)
+4. [Schema Reference](#schema-reference)
+5. [Parser Reference](#parser-reference)
+6. [Builder APIs](#builder-apis)
+7. [Preset Utilities](#preset-utilities)
+8. [Reactive Query System](#reactive-query-system)
+9. [Examples](#examples)
+10. [API Reference](#api-reference)
+
+---
+
+## Overview
+
+Obsidian Bases are YAML-based files that define dynamic views of notes in an Obsidian vault. A Base file can contain multiple views, global filters, formulas, property configurations, and custom summaries.
+
+This TypeScript implementation provides:
+
+- **Complete type safety** for all Obsidian Bases constructs
+- **Parser with AST generation** for filter and formula expressions
+- **FilterExpObject** with extracted components for programmatic access
+- **Evaluator** for executing expressions against file/note contexts
+- **Builder APIs** for fluent base and filter construction
+- **Preset utilities** for common patterns
+- **YAML serialization** for outputting valid base files
+
+### Official Documentation
+
+- https://help.obsidian.md/bases
+- https://help.obsidian.md/bases/syntax
+- https://help.obsidian.md/bases/functions
+- https://help.obsidian.md/formulas
+
+---
+
+## Installation
+
+Copy the TypeScript files to your project:
+
+```bash
+cp index.ts obsidian-bases-schema.ts obsidian-bases-parser.ts obsidian-bases-utils.ts obsidian-bases-reactive.ts obsidian-bases-example.ts your-project/
+```
+
+### Dependencies
+
+For the reactive query system, Vue 3 is required:
+
+```bash
+npm install vue
+```
+
+---
+
+## Core Concepts
+
+### Base File Structure
+
+```yaml
+# Global filters apply to ALL views
+filters:
+  and:
+    - file.hasTag("project")
+    - file.ext == "md"
+
+# Formula properties available across all views
+formulas:
+  days_old: '((now() - file.ctime) / 86400000).round(0)'
+  status_icon: 'if(status == "done", "✅", "⏳")'
+
+# Property display configurations
+properties:
+  status:
+    displayName: "Status"
+  formula.days_old:
+    displayName: "Age (days)"
+
+# Custom summary formulas
+summaries:
+  avgAge: 'values.mean().round(1)'
+
+# View definitions
+views:
+  - type: table
+    name: "Active Projects"
+    order:
+      - file.name
+      - status
+      - formula.days_old
+    filters:
+      and:
+        - status != "archived"
+```
+
+### Filter Expressions
+
+Filters can be:
+
+1. **Simple string expressions**:
+   ```typescript
+   'status == "done"'
+   'priority > 3'
+   'file.hasTag("book")'
+   ```
+
+2. **Parsed FilterExpObject** with extracted components:
+   ```typescript
+   const parsed = parseFilterExpression('file.hasTag("book") && status == "reading"');
+   // Access: parsed.fileMethods, parsed.referencedTags, parsed.comparisons, etc.
+   ```
+
+3. **Recursive FilterObject** with and/or/not:
+   ```typescript
+   {
+     and: [
+       'file.hasTag("task")',
+       { or: ['priority == 1', 'priority == 2'] },
+       { not: ['file.hasTag("archived")'] }
+     ]
+   }
+   ```
+
+### Property Types
+
+| Prefix | Example | Description |
+|--------|---------|-------------|
+| `note.` | `note.status` | Note frontmatter properties |
+| `file.` | `file.name` | File metadata properties |
+| `formula.` | `formula.days_old` | Computed formula properties |
+| `this.` | `this.file.name` | Reference to context file |
+
+### View Types
+
+| Type | Description |
+|------|-------------|
+| `table` | Rows with columns for properties |
+| `cards` | Card-based layout |
+| `list` | Bulleted or numbered list |
+| `map` | Geographic map (requires Maps plugin) |
+
+---
+
+## Schema Reference
+
+### Filter Types
+
+```typescript
+// Comparison operators
+type ComparisonOperator = '==' | '!=' | '>' | '<' | '>=' | '<=';
+
+// Boolean operators
+type BooleanOperator = '&&' | '||' | '!';
+
+// Arithmetic operators
+type ArithmeticOperator = '+' | '-' | '*' | '/' | '%';
+
+// Property prefix types
+type PropertyPrefix = 'note' | 'file' | 'formula' | 'this';
+
+// View types
+type ViewType = 'table' | 'cards' | 'list' | 'map';
+
+// Sort direction
+type SortDirection = 'ASC' | 'DESC';
+```
+
+### FilterExpObject
+
+The parsed filter expression with all extracted components:
+
+```typescript
+interface FilterExpObject {
+  /** Original filter expression string */
+  raw: string;
+
+  /** Expression type: 'comparison', 'boolean', 'arithmetic', 'function_call', 'property_access', 'literal', 'conditional', 'unary', 'complex' */
+  expressionType: ExpressionType;
+
+  /** Parsed AST */
+  ast?: ASTExpression;
+
+  /** All property references found */
+  properties: PropertyReference[];
+
+  /** All function calls found */
+  functionCalls: FunctionCall[];
+
+  /** All comparison operations found */
+  comparisons: ComparisonOperation[];
+
+  /** All literal values found */
+  literals: LiteralValue[];
+
+  /** Has boolean operators (&&, ||, !) */
+  hasBooleanOperators: boolean;
+
+  /** Has date arithmetic (e.g., now() - "7d") */
+  hasDateArithmetic: boolean;
+
+  /** Uses 'this' keyword */
+  usesThisReference: boolean;
+
+  /** File methods used (hasTag, hasLink, inFolder, etc.) */
+  fileMethods: string[];
+
+  /** Note properties referenced */
+  noteProperties: string[];
+
+  /** File properties referenced */
+  fileProperties: string[];
+
+  /** Formula properties referenced */
+  formulaProperties: string[];
+
+  /** Tags from file.hasTag() calls */
+  referencedTags: string[];
+
+  /** Folders from file.inFolder() calls */
+  referencedFolders: string[];
+
+  /** Whether parsing succeeded */
+  isValid: boolean;
+
+  /** Parse errors if any */
+  errors?: string[];
+}
+```
+
+### PropertyReference
+
+```typescript
+interface PropertyReference {
+  /** Prefix: 'note', 'file', 'formula', 'this', or undefined */
+  prefix: PropertyPrefix | undefined;
+
+  /** Property name (e.g., 'name', 'status', 'hasTag') */
+  name: string;
+
+  /** Full path as it appears in expression */
+  fullPath: string;
+
+  /** Whether this is a method call */
+  isMethod: boolean;
+
+  /** Arguments if this is a method call */
+  methodArgs?: string[];
+}
+```
+
+### FunctionCall
+
+```typescript
+interface FunctionCall {
+  /** Function name */
+  name: string;
+
+  /** Whether this is a global function (not a method) */
+  isGlobal: boolean;
+
+  /** Arguments as raw strings */
+  arguments: string[];
+
+  /** Object prefix if method call (e.g., 'file' in file.hasTag) */
+  objectPrefix?: string;
+}
+```
+
+### ComparisonOperation
+
+```typescript
+interface ComparisonOperation {
+  /** The operator used */
+  operator: ComparisonOperator;
+
+  /** Left side of comparison */
+  left: PropertyReference | LiteralValue | FunctionCall;
+
+  /** Right side of comparison */
+  right: PropertyReference | LiteralValue | FunctionCall;
+}
+```
+
+### LiteralValue
+
+```typescript
+interface LiteralValue {
+  /** Literal type */
+  type: 'string' | 'number' | 'boolean' | 'null' | 'regexp' | 'duration';
+
+  /** Raw value as it appears in expression */
+  raw: string;
+
+  /** Parsed value */
+  value: string | number | boolean | null | RegExp;
+}
+```
+
+### FilterObject
+
+```typescript
+interface FilterObject {
+  /** All conditions must be true */
+  and?: (FilterExpression | FilterObject)[];
+
+  /** Any condition can be true */
+  or?: (FilterExpression | FilterObject)[];
+
+  /** Exclude matching items */
+  not?: (FilterExpression | FilterObject)[];
+}
+```
+
+### ObsidianBase
+
+```typescript
+interface ObsidianBase {
+  /** Global filters applied to ALL views */
+  filters?: Filter;
+
+  /** Formula properties available across all views */
+  formulas?: Formulas;
+
+  /** Property display configurations */
+  properties?: Properties;
+
+  /** Custom summary formulas */
+  summaries?: Summaries;
+
+  /** View definitions */
+  views: View[];
+}
+```
+
+### View Types
+
+```typescript
+interface BaseView {
+  type: ViewType;
+  name: string;
+  limit?: number;
+  groupBy?: GroupByConfig;
+  filters?: Filter;
+  order?: string[];
+  summaries?: ViewSummaries;
+}
+
+interface TableView extends BaseView {
+  type: 'table';
+}
+
+interface CardsView extends BaseView {
+  type: 'cards';
+}
+
+interface ListView extends BaseView {
+  type: 'list';
+}
+
+interface MapView extends BaseView {
+  type: 'map';
+  latProperty?: string;
+  lngProperty?: string;
+  titleProperty?: string;
+}
+
+type View = TableView | CardsView | ListView | MapView;
+```
+
+### Formulas and Properties
+
+```typescript
+type FormulaExpression = string | FilterExpObject;
+
+type Formulas = Record<string, FormulaExpression>;
+
+interface PropertyConfig {
+  displayName?: string;
+}
+
+type Properties = Record<string, PropertyConfig>;
+```
+
+### Summaries
+
+```typescript
+type DefaultSummaryFormula =
+  | 'Average' | 'Min' | 'Max' | 'Sum' | 'Range' | 'Median' | 'Stddev'
+  | 'Earliest' | 'Latest' | 'Checked' | 'Unchecked' | 'Empty' | 'Filled' | 'Unique';
+
+type SummaryExpression = string;
+
+type Summaries = Record<string, SummaryExpression>;
+
+type ViewSummaries = Record<string, DefaultSummaryFormula | string>;
+```
+
+---
+
+## Parser Reference
+
+### Lexer
+
+Tokenizes filter/formula expressions:
+
+```typescript
+import { Lexer } from './index';
+
+const expression = 'file.hasTag("book") && status == "reading"';
+const lexer = new Lexer(expression);
+const tokens = lexer.tokenize();
+
+// Tokens: [
+//   { type: 'IDENTIFIER', value: 'file', position: 0 },
+//   { type: 'DOT', value: '.', position: 4 },
+//   ...
+// ]
+```
+
+### Parser
+
+Builds AST from tokens:
+
+```typescript
+import { Parser } from './index';
+
+const parser = new Parser(tokens);
+const result = parser.parse();
+
+if (result.success) {
+  console.log(result.ast); // ASTExpression
+}
+```
+
+### FilterExpressionParser
+
+Parses filter strings into FilterExpObject with extracted components:
+
+```typescript
+import { FilterExpressionParser } from './index';
+
+const parser = new FilterExpressionParser();
+const parsed = parser.parse('file.hasTag("book") && status == "reading"');
+
+// Access extracted components
+console.log(parsed.fileMethods);        // ['hasTag']
+console.log(parsed.referencedTags);     // ['book']
+console.log(parsed.noteProperties);     // ['status']
+console.log(parsed.comparisons);        // [{ operator: '==', left: ..., right: ... }]
+console.log(parsed.hasBooleanOperators); // true
+```
+
+### Evaluator
+
+Executes parsed expressions against context:
+
+```typescript
+import { Evaluator } from './index';
+
+const context: ExecutionContext = {
+  file: {
+    name: 'My Note.md',
+    basename: 'My Note',
+    path: 'Notes/My Note.md',
+    folder: 'Notes',
+    ext: 'md',
+    size: 1024,
+    ctime: new Date(),
+    mtime: new Date(),
+    tags: ['book', 'reading'],
+    links: [],
+    backlinks: [],
+    embeds: [],
+    properties: {},
+  },
+  note: {
+    status: 'reading',
+    priority: 2,
+  },
+  formula: {},
+};
+
+const evaluator = new Evaluator(context);
+const result = evaluator.evaluate(ast);
+
+console.log(result); // { type: 'BOOLEAN', value: true }
+```
+
+### Validator
+
+Validates filter/formula syntax:
+
+```typescript
+import { Validator } from './index';
+
+const validator = new Validator();
+
+const filterResult = validator.validateFilter('status == "done"');
+console.log(filterResult.valid);   // true
+console.log(filterResult.errors);  // []
+
+const formulaResult = validator.validateFormula('if(done, "Yes", "No")');
+console.log(formulaResult.valid);  // true
+```
+
+---
+
+## Builder APIs
+
+### BaseBuilder
+
+Fluent API for creating bases:
+
+```typescript
+import { createBase, PresetFilters, PresetFormulas } from './index';
+
+const base = createBase()
+  // Global filters
+  .withFilters(PresetFilters.byTag('project'))
+  .addFilter(PresetFilters.byExtension('md'))
+
+  // Formulas
+  .addFormula('days_old', PresetFormulas.daysOld())
+  .addFormula('status_icon', PresetFormulas.statusIcon())
+  .withFormulas({
+    total: 'price * quantity',
+    formatted: 'if(price, "$" + price.toFixed(2), "")',
+  })
+
+  // Properties
+  .configureProperty('status', { displayName: 'Status' })
+  .configureProperty('formula.days_old', { displayName: 'Age' })
+
+  // Summaries
+  .addSummary('avgAge', 'values.mean().round(1)')
+
+  // Views
+  .addTableView('Active Projects', {
+    order: ['file.name', 'status', 'formula.days_old'],
+    filters: { and: ['status != "archived"'] },
+    groupBy: { property: 'status', direction: 'ASC' },
+    summaries: { 'formula.days_old': 'Average' },
+  })
+  .addCardsView('Project Cards', {
+    order: ['file.name', 'cover', 'description'],
+  })
+  .addListView('Quick List', {
+    order: ['file.name', 'status'],
+    limit: 20,
+  })
+  .addMapView('Locations', {
+    latProperty: 'latitude',
+    lngProperty: 'longitude',
+    titleProperty: 'name',
+  })
+
+  .build();
+```
+
+### FilterBuilder
+
+Fluent API for building complex filters:
+
+```typescript
+import { createFilter, and, or, not } from './index';
+
+// Method chaining
+const filter1 = createFilter()
+  .and('file.hasTag("project")')
+  .and('file.ext == "md"')
+  .not('file.hasTag("archived")')
+  .build();
+
+// Static factory methods
+const filter2 = and(
+  'file.hasTag("important")',
+  or(
+    'priority == 1',
+    'priority == 2'
+  ),
+  not('file.inFolder("Archive")')
+);
+
+const filter3 = or(
+  and('file.hasTag("urgent")', 'status == "todo"'),
+  and('priority == 1', 'due < today()')
+);
+```
+
+---
+
+## Preset Utilities
+
+### PresetFilters
+
+```typescript
+import { PresetFilters } from './index';
+
+// By tag
+PresetFilters.byTag('project');                    // 'file.hasTag("project")'
+
+// By extension
+PresetFilters.byExtension('md');                   // 'file.ext == "md"'
+
+// By folder
+PresetFilters.inFolder('Notes');                   // 'file.inFolder("Notes")'
+
+// By date
+PresetFilters.modifiedWithin(7);                   // 'file.mtime > now() - "7d"'
+PresetFilters.createdWithin(30);                   // 'file.ctime > now() - "30d"'
+
+// By property
+PresetFilters.byProperty('status', 'active');      // 'status == "active"'
+PresetFilters.byStatus('done');                    // 'status == "done"'
+
+// By link
+PresetFilters.hasLink('filename');                 // 'file.hasLink("filename")'
+
+// By name pattern
+PresetFilters.nameMatches('^\\d{4}-\\d{2}');       // '/^\\d{4}-\\d{2}/.matches(file.name)'
+
+// Combine filters
+PresetFilters.all(filter1, filter2);               // { and: [filter1, filter2] }
+PresetFilters.any(filter1, filter2);               // { or: [filter1, filter2] }
+PresetFilters.none(filter1, filter2);              // { not: [filter1, filter2] }
+```
+
+### PresetFormulas
+
+```typescript
+import { PresetFormulas } from './index';
+
+// Date calculations
+PresetFormulas.daysUntilDue('due');                // Days until due date
+PresetFormulas.isOverdue('due', 'status', 'done'); // Check if overdue
+PresetFormulas.daysOld();                          // Days since creation
+PresetFormulas.lastModified();                     // Relative modification time
+PresetFormulas.formatDate('date', 'YYYY-MM-DD');   // Format date
+PresetFormulas.dayOfWeek('date');                  // Day of week
+
+// Status/priority display
+PresetFormulas.priorityLabel('priority', [
+  { value: 1, label: 'High', icon: '🔴' },
+  { value: 2, label: 'Medium', icon: '🟡' },
+  { value: 3, label: 'Low', icon: '🟢' },
+]);
+
+PresetFormulas.statusIcon('status', {
+  done: '✅',
+  'in-progress': '🔄',
+  todo: '⏳',
+});
+
+// Text formatting
+PresetFormulas.formatCurrency('price', '$');       // Format as currency
+PresetFormulas.readingTime('pages', 2);            // Reading time estimate
+PresetFormulas.wordEstimate();                     // Word count from file size
+
+// File info
+PresetFormulas.linkCount();                        // Number of links
+```
+
+### PresetSummaries
+
+```typescript
+import { PresetSummaries } from './index';
+
+PresetSummaries.customAverage(2);                  // Average with rounding
+PresetSummaries.customSum(2);                      // Sum with rounding
+PresetSummaries.countFilled();                     // Count non-empty values
+PresetSummaries.percentTrue();                     // Percentage of true values
+PresetSummaries.uniqueJoin(', ');                  // Join unique values
+```
+
+---
+
+## Examples
+
+### Task Tracker Base
+
+```typescript
+import { createBase, PresetFormulas } from './index';
+
+const taskBase = createBase()
+  .withFilters({
+    and: [
+      'file.hasTag("task")',
+      'file.ext == "md"',
+    ],
+  })
+  .addFormula('days_until_due', PresetFormulas.daysUntilDue())
+  .addFormula('is_overdue', PresetFormulas.isOverdue())
+  .addFormula('priority_label', PresetFormulas.priorityLabel())
+  .configureProperty('formula.days_until_due', { displayName: 'Days Left' })
+  .configureProperty('formula.priority_label', { displayName: 'Priority' })
+  .addTableView('Active Tasks', {
+    order: ['file.name', 'formula.priority_label', 'due', 'formula.days_until_due'],
+    filters: { and: ['status != "done"'] },
+    groupBy: { property: 'status', direction: 'ASC' },
+    summaries: { 'formula.days_until_due': 'Average' },
+  })
+  .addTableView('Completed', {
+    order: ['file.name', 'completed_date'],
+    filters: { and: ['status == "done"'] },
+  })
+  .build();
+```
+
+### Reading List Base
+
+```typescript
+import { createBase, PresetFormulas } from './index';
+
+const readingBase = createBase()
+  .withFilters({
+    or: [
+      'file.hasTag("book")',
+      'file.hasTag("article")',
+    ],
+  })
+  .addFormula('reading_time', PresetFormulas.readingTime('pages'))
+  .addFormula('status_icon', PresetFormulas.statusIcon())
+  .addFormula('year_read', 'if(finished_date, date(finished_date).year, "")')
+  .configureProperty('author', { displayName: 'Author' })
+  .configureProperty('formula.reading_time', { displayName: 'Est. Time' })
+  .addCardsView('Library', {
+    order: ['cover', 'file.name', 'author', 'formula.status_icon'],
+    filters: { not: ['status == "dropped"'] },
+  })
+  .addTableView('To Read', {
+    order: ['file.name', 'author', 'pages', 'formula.reading_time'],
+    filters: { and: ['status == "to-read"'] },
+  })
+  .build();
+```
+
+### Using FilterExpObject
+
+```typescript
+import { parseFilterExpression } from './index';
+
+// Parse a complex filter
+const parsed = parseFilterExpression(
+  'priority > 3 && file.inFolder("Projects") && !file.hasTag("archived")'
+);
+
+// Check expression characteristics
+if (parsed.isValid) {
+  console.log('Expression type:', parsed.expressionType); // 'boolean'
+  console.log('Has boolean operators:', parsed.hasBooleanOperators); // true
+
+  // Check file methods used
+  if (parsed.fileMethods.includes('inFolder')) {
+    console.log('Folders referenced:', parsed.referencedFolders);
+    // ['Projects']
+  }
+
+  if (parsed.fileMethods.includes('hasTag')) {
+    console.log('Tags referenced:', parsed.referencedTags);
+    // ['archived']
+  }
+
+  // Check properties
+  if (parsed.noteProperties.includes('priority')) {
+    console.log('Uses priority property');
+  }
+
+  // Iterate comparisons
+  for (const comp of parsed.comparisons) {
+    console.log(`${comp.left.name} ${comp.operator} ${comp.right.raw}`);
+    // "priority > 3"
+  }
+
+  // Access all function calls
+  for (const call of parsed.functionCalls) {
+    console.log(`${call.objectPrefix}.${call.name}(${call.arguments.join(', ')})`);
+    // "file.inFolder("Projects")"
+    // "file.hasTag("archived")"
+  }
+
+  // Access all properties
+  for (const prop of parsed.properties) {
+    console.log(`${prop.prefix}.${prop.name}`);
+    // "note.priority"
+    // "file.inFolder"
+    // "file.hasTag"
+  }
+}
+```
+
+### Date Arithmetic Filters
+
+```typescript
+import { parseFilterExpression } from './index';
+
+// Parse date arithmetic expression
+const parsed = parseFilterExpression('file.mtime > now() - "7d"');
+
+if (parsed.hasDateArithmetic) {
+  console.log('Uses date arithmetic');
+  console.log('File properties:', parsed.fileProperties); // ['mtime']
+  console.log('Function calls:', parsed.functionCalls);   // [{ name: 'now', isGlobal: true }]
+  console.log('Literals:', parsed.literals);              // [{ type: 'duration', raw: '"7d"', value: '7d' }]
+}
+```
+
+### Conditional Logic with Parsed Filters
+
+```typescript
+import { parseFilterExpression } from './index';
+
+function analyzeFilter(filterExpr: string): string {
+  const parsed = parseFilterExpression(filterExpr);
+
+  if (!parsed.isValid) {
+    return `Invalid filter: ${parsed.errors?.join(', ')}`;
+  }
+
+  const analysis: string[] = [];
+
+  // Analyze expression type
+  switch (parsed.expressionType) {
+    case 'comparison':
+      analysis.push('Simple comparison filter');
+      break;
+    case 'boolean':
+      analysis.push('Boolean combination filter');
+      break;
+    case 'function_call':
+      analysis.push('Function-based filter');
+      break;
+    case 'complex':
+      analysis.push('Complex filter');
+      break;
+  }
+
+  // Analyze file methods
+  if (parsed.fileMethods.length > 0) {
+    analysis.push(`Uses file methods: ${parsed.fileMethods.join(', ')}`);
+  }
+
+  // Analyze tags
+  if (parsed.referencedTags.length > 0) {
+    analysis.push(`Filters by tags: ${parsed.referencedTags.join(', ')}`);
+  }
+
+  // Analyze folders
+  if (parsed.referencedFolders.length > 0) {
+    analysis.push(`Filters by folders: ${parsed.referencedFolders.join(', ')}`);
+  }
+
+  // Analyze properties
+  if (parsed.noteProperties.length > 0) {
+    analysis.push(`Uses note properties: ${parsed.noteProperties.join(', ')}`);
+  }
+
+  // Analyze date arithmetic
+  if (parsed.hasDateArithmetic) {
+    analysis.push('Uses date arithmetic');
+  }
+
+  // Analyze boolean operators
+  if (parsed.hasBooleanOperators) {
+    analysis.push('Uses boolean operators');
+  }
+
+  return analysis.join('\n');
+}
+
+console.log(analyzeFilter('file.hasTag("urgent") && priority == 1'));
+// Output:
+// Boolean combination filter
+// Uses file methods: hasTag
+// Filters by tags: urgent
+// Uses note properties: priority
+// Uses boolean operators
+```
+
+---
+
+## Reactive Query System
+
+The reactive query system provides Vue-integrated reactive querying for Obsidian Bases. It automatically re-evaluates when source data or base configuration changes.
+
+### BaseSource Type
+
+```typescript
+interface BaseSource<T = void> {
+  // Obsidian-specific fields (all optional)
+  id?: string;
+  name?: string;           // File name (e.g., "My Note.md")
+  basename?: string;       // Without extension (e.g., "My Note")
+  path?: string;           // Full path (e.g., "Notes/My Note.md")
+  folder?: string;         // Parent folder (e.g., "Notes")
+  ext?: string;            // Extension (e.g., "md")
+  size?: number;           // File size in bytes
+  ctime?: Date | string;   // Created time
+  mtime?: Date | string;   // Modified time
+  tags?: string[];         // Tags
+  links?: string[];        // Internal links
+  backlinks?: string[];    // Backlinks
+  embeds?: string[];       // Embeds
+  properties?: Record<string, unknown>;  // Frontmatter properties
+
+  // Your custom data
+  data?: T;
+}
+```
+
+### ReactiveBaseQueryResult
+
+```typescript
+interface ReactiveBaseQueryResult<T> {
+  items: BaseSource<T>[];           // Filtered and sorted items
+  totalCount: number;               // Total count before limit
+  groups?: Map<string, BaseSource<T>[]>;  // Grouped items
+  summaries?: Record<string, unknown>;    // Calculated summaries
+  view: View | null;                // Current view configuration
+  isProcessing: boolean;            // Whether processing
+  errors: string[];                 // Any errors
+}
+```
+
+### Reading a Base from YAML
+
+```typescript
+import { readBase } from './index';
+
+const yaml = `
+filters:
+  and:
+    - file.hasTag("task")
+formulas:
+  days_old: '((now() - file.ctime) / 86400000).round(0)'
+views:
+  - type: table
+    name: "Tasks"
+    order: [file.name, formula.days_old]
+`;
+
+const base = readBase(yaml);
+```
+
+### Using useBaseQuery Composable
+
+```typescript
+import { ref } from 'vue';
+import { useBaseQuery, readBase, BaseSource } from './index';
+
+interface Task {
+  title: string;
+  assignee: string;
+}
+
+const source = ref<BaseSource<Task>[]>([
+  {
+    id: '1',
+    name: 'Task 1.md',
+    tags: ['task'],
+    properties: { status: 'todo', priority: 1 },
+    data: { title: 'Complete docs', assignee: 'Alice' },
+  },
+  // ... more items
+]);
+
+const base = readBase(yamlString);
+
+// Create reactive query
+const {
+  getViewResults,
+  getAllResults,
+  refresh,
+  source: reactiveSource,
+  base: reactiveBase,
+} = useBaseQuery(source, base, { debug: true });
+
+// Get reactive results for a view
+const activeTasks = getViewResults('Tasks');
+
+// Access reactive data
+console.log(activeTasks.value.items);       // Filtered items
+console.log(activeTasks.value.totalCount);  // Total count
+console.log(activeTasks.value.groups);      // Grouped items
+console.log(activeTasks.value.summaries);   // Calculated summaries
+```
+
+### Using useBaseView Composable (Single View)
+
+```typescript
+import { ref } from 'vue';
+import { useBaseView, readBase, BaseSource } from './index';
+
+const source = ref<BaseSource[]>([/* ... */]);
+const base = readBase(yamlString);
+
+// Get reactive results for single view
+const {
+  items,        // ComputedRef<BaseSource[]>
+  totalCount,   // ComputedRef<number>
+  groups,       // ComputedRef<Map<string, BaseSource[]> | undefined>
+  summaries,    // ComputedRef<Record<string, unknown> | undefined>
+  isProcessing, // ComputedRef<boolean>
+  errors,       // ComputedRef<string[]>
+  refresh,      // () => void
+} = useBaseView(source, base, 'Tasks');
+
+// In Vue template:
+// <div v-for="task in items" :key="task.id">{{ task.properties?.title }}</div>
+```
+
+### Using ReactiveBaseQuery Class
+
+```typescript
+import { ref } from 'vue';
+import { ReactiveBaseQuery, readBase, BaseSource } from './index';
+
+const source = ref<BaseSource[]>([/* ... */]);
+const base = readBase(yamlString);
+
+// Create query instance
+const query = new ReactiveBaseQuery(source, base, {
+  debug: true,
+  customFunctions: {
+    calculateScore: (p: number, c: number) => p * c * 10,
+  },
+});
+
+// Get computed results for different views
+const tableResults = query.getViewResults('Table View');
+const cardResults = query.getViewResults('Card View');
+
+// Access reactive data
+console.log(tableResults.value.items);
+console.log(tableResults.value.totalCount);
+
+// Update source - results auto-update
+query.setSource([...newItems]);
+
+// Update base - results auto-update
+query.setBase(newBase);
+
+// Force refresh
+query.refresh();
+```
+
+### Vue Component Example
+
+```vue
+<template>
+  <div>
+    <h1>Tasks ({{ taskCount }})</h1>
+
+    <div v-if="isProcessing">Loading...</div>
+    <div v-else-if="errorMessages.length > 0">
+      Errors: {{ errorMessages.join(', ') }}
+    </div>
+    <ul v-else>
+      <li v-for="task in tasks" :key="task.id">
+        {{ task.properties?.priority_label }} -
+        {{ task.data?.title }}
+        ({{ task.properties?.days_until_due }} days left)
+      </li>
+    </ul>
+
+    <button @click="addTask">Add Task</button>
+    <button @click="refresh">Refresh</button>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed } from 'vue';
+import { useBaseView, readBase, BaseSource } from './index';
+
+interface Task {
+  title: string;
+}
+
+const source = ref<BaseSource<Task>[]>([
+  {
+    id: '1',
+    name: 'Task 1.md',
+    tags: ['task'],
+    properties: { status: 'todo', priority: 1 },
+    data: { title: 'My Task' },
+  },
+]);
+
+const base = readBase(`
+  formulas:
+    days_until_due: 'if(due, ((date(due) - today()) / 86400000).round(0), "")'
+    priority_label: 'if(priority == 1, "🔴", "🟢")'
+  views:
+    - type: list
+      name: "Tasks"
+      order: [formula.priority_label, file.name]
+`);
+
+const {
+  items: tasks,
+  totalCount: taskCount,
+  isProcessing,
+  errors: errorMessages,
+  refresh,
+} = useBaseView(source, base, 'Tasks');
+
+function addTask() {
+  source.value.push({
+    id: String(Date.now()),
+    name: 'New Task.md',
+    tags: ['task'],
+    properties: { status: 'todo', priority: 2, due: '2024-12-31' },
+    data: { title: 'New Task' },
+  });
+  // tasks and taskCount automatically update!
+}
+</script>
+```
+
+### Advanced Patterns
+
+#### Multiple Views with Shared Source
+
+```typescript
+function useMultiViewDashboard() {
+  const source = ref<BaseSource[]>([/* ... */]);
+  const base = readBase(`
+    views:
+      - type: table
+        name: "All Items"
+        order: [file.name]
+      - type: cards
+        name: "Gallery"
+        order: [file.name, cover]
+      - type: list
+        name: "Quick List"
+        limit: 10
+  `);
+
+  const query = new ReactiveBaseQuery(source, base);
+
+  return {
+    tableView: query.getViewResults('All Items'),
+    cardsView: query.getViewResults('Gallery'),
+    listView: query.getViewResults('Quick List'),
+    source,
+  };
+}
+```
+
+#### Dynamic Base Switching
+
+```typescript
+function useDynamicBase() {
+  const source = ref<BaseSource[]>([/* ... */]);
+  const currentBaseName = ref('tasks');
+
+  const bases: Record<string, ObsidianBase> = {
+    tasks: readBase(`...`),
+    notes: readBase(`...`),
+  };
+
+  const currentBase = computed(() => bases[currentBaseName.value]);
+  const query = new ReactiveBaseQuery(source, currentBase);
+
+  function switchBase(name: string) {
+    currentBaseName.value = name;
+    // Query automatically updates due to reactive base
+  }
+
+  return {
+    results: query.getAllResults(),
+    switchBase,
+    currentBaseName,
+  };
+}
+```
+
+#### Searchable List with Reactive Filters
+
+```typescript
+function useSearchableList() {
+  const source = ref<BaseSource[]>([/* ... */]);
+  const searchQuery = ref('');
+
+  const base = computed(() => readBase(`
+    filters:
+      ${searchQuery.value ? `and:
+        - 'file.name.contains("${searchQuery.value}")'` : ''}
+    views:
+      - type: list
+        name: "Search Results"
+        order: [file.name]
+  `));
+
+  const query = new ReactiveBaseQuery(source, base);
+
+  return {
+    results: query.getViewResults('Search Results'),
+    searchQuery,
+  };
+}
+```
+
+---
+
+## API Reference
+
+### Main Exports
+
+```typescript
+// Schema types
+export {
+  ObsidianBase,
+  Filter,
+  FilterExpObject,
+  FilterObject,
+  PropertyReference,
+  FunctionCall,
+  ComparisonOperation,
+  LiteralValue,
+  ExpressionType,
+  View,
+  Formulas,
+  Properties,
+  Summaries,
+  // ... and more
+} from './obsidian-bases-schema';
+
+// Parser classes and functions
+export {
+  Lexer,
+  Parser,
+  Evaluator,
+  FilterObjectParser,
+  FilterExpressionParser,
+  Validator,
+  BUILTIN_FUNCTIONS,
+  parseFilter,
+  parseFilterExpression,
+  parseFormula,
+  evaluateFilter,
+  evaluateFormula,
+  validateFilter,
+  validateFormula,
+} from './obsidian-bases-parser';
+
+// Builder classes and utilities
+export {
+  BaseBuilder,
+  FilterBuilder,
+  PresetFilters,
+  PresetFormulas,
+  PresetSummaries,
+  createBase,
+  createFilter,
+  and,
+  or,
+  not,
+  serializeToYAML,
+} from './obsidian-bases-utils';
+
+// Reactive query system
+export {
+  ReactiveBaseQuery,
+  useBaseQuery,
+  useBaseView,
+  readBase,
+  createBaseQuery,
+  createBaseQueryFromYAML,
+} from './obsidian-bases-reactive';
+```
+
+### Complete Function Signatures
+
+```typescript
+// Base creation
+function createBase(): BaseBuilder;
+
+// Filter creation
+function createFilter(initialFilter?: Filter): FilterBuilder;
+function and(...filters: Filter[]): FilterBuilder;
+function or(...filters: Filter[]): FilterBuilder;
+function not(...filters: Filter[]): FilterBuilder;
+
+// Parsing
+function parseFilter(filter: Filter): ParseResult<ASTExpression | FilterGroupNode>;
+function parseFilterExpression(expression: string): FilterExpObject;
+function parseFormula(formula: string): ParseResult<ASTExpression>;
+
+// Evaluation
+function evaluateFilter(filter: Filter, context: ExecutionContext): RuntimeValue;
+function evaluateFormula(formula: string, context: ExecutionContext): RuntimeValue;
+
+// Validation
+function validateFilter(filter: Filter): ValidationResult;
+function validateFormula(formula: string): ValidationResult;
+
+// Serialization
+function serializeToYAML(base: ObsidianBase): string;
+
+// YAML reading
+function readBase(yamlString: string): ObsidianBase;
+
+// Reactive queries
+function useBaseQuery<T>(
+  source: Ref<BaseSource<T>[]> | BaseSource<T>[],
+  base: ObsidianBase | Ref<ObsidianBase>,
+  options?: ReactiveBaseQueryOptions
+): UseBaseQueryReturn<T>;
+
+function useBaseView<T>(
+  source: Ref<BaseSource<T>[]> | BaseSource<T>[],
+  base: ObsidianBase | Ref<ObsidianBase>,
+  viewName: string,
+  options?: ReactiveBaseQueryOptions
+): UseBaseViewReturn<T>;
+
+function createBaseQuery<T>(
+  source: Ref<BaseSource<T>[]> | BaseSource<T>[],
+  base: ObsidianBase | Ref<ObsidianBase>,
+  options?: ReactiveBaseQueryOptions
+): ReactiveBaseQuery<T>;
+
+function createBaseQueryFromYAML<T>(
+  source: Ref<BaseSource<T>[]> | BaseSource<T>[],
+  yamlString: string,
+  options?: ReactiveBaseQueryOptions
+): ReactiveBaseQuery<T>;
+```
+
+### ReactiveBaseQuery Class
+
+```typescript
+class ReactiveBaseQuery<T = void> {
+  constructor(
+    source: Ref<BaseSource<T>[]> | BaseSource<T>[],
+    base: ObsidianBase | Ref<ObsidianBase>,
+    options?: ReactiveBaseQueryOptions
+  );
+
+  // Getters
+  getSource(): Ref<BaseSource<T>[]>;
+  getBase(): Ref<ObsidianBase>;
+  getState(): Ref<QueryState>;
+
+  // Setters
+  setSource(newSource: BaseSource<T>[]): void;
+  setBase(newBase: ObsidianBase): void;
+
+  // Query methods
+  getViewResults(viewName: string): ComputedRef<ReactiveBaseQueryResult<T>>;
+  getAllResults(): ComputedRef<ReactiveBaseQueryResult<T>>;
+  getViewNames(): ComputedRef<string[]>;
+  getView(name: string): View | undefined;
+
+  // Actions
+  refresh(): void;
+}
+```
+
+---
+
+## License
+
+MIT
+
+## References
+
+- [Obsidian Bases](https://help.obsidian.md/bases)
+- [Bases Syntax](https://help.obsidian.md/bases/syntax)
+- [Functions](https://help.obsidian.md/bases/functions)
+- [Formulas](https://help.obsidian.md/formulas)
+- [Views](https://help.obsidian.md/bases/views)

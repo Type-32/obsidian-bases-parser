@@ -1,0 +1,53 @@
+{
+    "name": "@type32/obsidian-bases-parser",
+    "version": "0.1.0",
+    "description": "A complete TypeScript implementation for Obsidian Bases (.base files) including schema definitions, lexer, parser, evaluator, and reactive query system with Vue integration.",
+    "main": "./dist/index.js",
+    "module": "./dist/index.mjs",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "import": "./dist/index.mjs",
+            "require": "./dist/index.js"
+        }
+    },
+    "files": [
+		"dist",
+		"src",
+		"README.md",
+		"LICENSE"
+    ],
+    "scripts": {
+        "build": "tsup src/index.ts --format esm,cjs --dts",
+        "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "release:minor": "bun run build && bun pm version minor && bun publish",
+        "release:patch": "bun run build && bun pm version patch && bun publish"
+    },
+    "keywords": [
+		"obsidian",
+		"obsidian-bases",
+		"bases",
+		"database",
+		"query",
+		"filter",
+		"formula",
+		"yaml",
+		"typescript",
+		"vue",
+		"reactive",
+		"parser",
+		"lexer",
+		"ast"
+    ],
+    "author": "Type-32",
+    "license": "MIT",
+    "devDependencies": {
+        "@types/node": "^25.2.0",
+        "tsup": "^8.5.1",
+        "typescript": "^5.9.3"
+    },
+    "dependencies": {
+        "vue": "^3.5.27"
+    }
+}
