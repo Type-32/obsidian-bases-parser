@@ -22,6 +22,7 @@ export {
   type BooleanOperator,
   type ArithmeticOperator,
   type SortDirection,
+  type SortConfig,
   type ViewType,
   type DefaultSummaryFormula,
   type DurationUnit,
@@ -34,6 +35,8 @@ export {
   type ComparisonOperation,
   type LiteralValue,
   type ExpressionType,
+  type ImageFit,
+  type ImageSource,
 
   // Property types
   type PropertyPrefix,
@@ -159,12 +162,18 @@ export {
 // =============================================================================
 
 export {
-  // Main class
+  // Main classes
   ReactiveBaseQuery,
+  ReactiveBase,
 
   // Vue composables
   useBaseQuery,
   useBaseView,
+  useBase,
+
+  // Types
+  type UseBaseOptions,
+  type UseBaseReturn,
 
   // YAML reader
   readBase,
@@ -172,6 +181,8 @@ export {
   // Convenience functions
   createBaseQuery,
   createBaseQueryFromYAML,
+  createReactiveBase,
+  createReactiveBaseFromYAML,
 } from './obsidian-bases-reactive';
 
 // =============================================================================

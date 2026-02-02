@@ -28,7 +28,14 @@ import {
   RuntimeValue,
   RuntimeValueType,
   SortDirection,
+  SortConfig,
   DefaultSummaryFormula,
+  ImageFit,
+  ImageSource,
+  Formulas,
+  Properties,
+  Summaries,
+  PropertyConfig,
 } from './obsidian-bases-schema';
 
 import {
@@ -44,313 +51,42 @@ import {
 // YAML PARSER - Read base from YAML
 // =============================================================================
 
+import * as yaml from 'js-yaml';
+
 /**
  * Parse a YAML string into an ObsidianBase object.
- * This is a lightweight YAML parser for Obsidian Bases.
+ * Uses js-yaml for robust YAML parsing.
  */
 export function readBase(yamlString: string): ObsidianBase {
-  const lines = yamlString.split('\n');
-  const result: Partial<ObsidianBase> = { views: [] };
-
-  let currentSection: string | null = null;
-  let currentView: Partial<View> | null = null;
-  let currentSubSection: string | null = null;
-  let indentStack: Array<{ key: string; obj: Record<string, unknown> }> = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    // Skip empty lines and comments
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const indent = line.search(/\S/);
-    const isListItem = trimmed.startsWith('- ');
-
-    // Top-level sections
-    if (indent === 0 && !isListItem) {
-      const [key, ...valueParts] = trimmed.split(':');
-      const value = valueParts.join(':').trim();
-
-      if (key === 'filters') {
-        currentSection = 'filters';
-        result.filters = value ? parseInlineFilter(value) : undefined;
-      } else if (key === 'formulas') {
-        currentSection = 'formulas';
-        result.formulas = {};
-      } else if (key === 'properties') {
-        currentSection = 'properties';
-        result.properties = {};
-      } else if (key === 'summaries') {
-        currentSection = 'summaries';
-        result.summaries = {};
-      } else if (key === 'views') {
-        currentSection = 'views';
-      } else if (currentSection === 'formulas' && result.formulas) {
-        result.formulas[key] = parseYamlValue(value);
-      } else if (currentSection === 'summaries' && result.summaries) {
-        result.summaries[key] = parseYamlValue(value);
-      }
-
-      continue;
+  try {
+    const parsed = yaml.load(yamlString) as Partial<ObsidianBase>;
+    
+    // Ensure views array exists
+    if (!parsed.views) {
+      parsed.views = [];
     }
-
-    // Handle filters section
-    if (currentSection === 'filters') {
-      if (indent === 2 && !isListItem) {
-        // and:, or:, not:
-        const key = trimmed.replace(':', '');
-        if (['and', 'or', 'not'].includes(key)) {
-          result.filters = parseFilterBlock(lines, i, key) as Filter;
-          // Skip processed lines
-          const blockEnd = findBlockEnd(lines, i);
-          i = blockEnd;
-        }
-      }
-      continue;
-    }
-
-    // Handle formulas section
-    if (currentSection === 'formulas' && result.formulas) {
-      if (indent === 2 && !isListItem) {
-        const [key, ...valueParts] = trimmed.split(':');
-        const value = valueParts.join(':').trim();
-        result.formulas[key] = parseYamlValue(value) || parseMultilineValue(lines, i);
-      }
-      continue;
-    }
-
-    // Handle properties section
-    if (currentSection === 'properties' && result.properties) {
-      if (indent === 2 && !isListItem) {
-        const propName = trimmed.replace(':', '');
-        result.properties[propName] = {};
-        indentStack = [{ key: propName, obj: result.properties[propName] }];
-      } else if (indent === 4 && indentStack.length > 0) {
-        const [key, ...valueParts] = trimmed.split(':');
-        const value = valueParts.join(':').trim();
-        indentStack[0].obj[key] = parseYamlValue(value);
-      }
-      continue;
-    }
-
-    // Handle views section
-    if (currentSection === 'views') {
-      if (isListItem && indent === 2) {
-        // Start new view
-        currentView = {};
-        result.views!.push(currentView as View);
-
-        const content = trimmed.substring(2).trim();
-        if (content) {
-          // Inline view properties
-          const [key, value] = content.split(':');
-          if (key && value) {
-            (currentView as Record<string, unknown>)[key.trim()] = parseYamlValue(value.trim());
-          }
-        }
-      } else if (currentView && indent >= 4) {
-        // View properties
-        const [key, ...valueParts] = trimmed.split(':');
-        const value = valueParts.join(':').trim();
-
-        if (key === 'groupBy') {
-          currentView.groupBy = { property: '', direction: 'ASC' };
-          indentStack = [{ key: 'groupBy', obj: currentView.groupBy as unknown as Record<string, unknown> }];
-        } else if (key === 'filters') {
-          currentView.filters = parseFilterBlock(lines, i, 'and') as Filter;
-          const blockEnd = findBlockEnd(lines, i);
-          i = blockEnd;
-        } else if (key === 'order') {
-          currentView.order = parseStringArray(lines, i);
-          const blockEnd = findArrayEnd(lines, i);
-          i = blockEnd;
-        } else if (key === 'summaries') {
-          currentView.summaries = parseSummariesBlock(lines, i);
-          const blockEnd = findBlockEnd(lines, i);
-          i = blockEnd;
-        } else if (indent === 4) {
-          (currentView as Record<string, unknown>)[key] = parseYamlValue(value);
-        } else if (indent === 6 && indentStack.length > 0) {
-          indentStack[0].obj[key] = parseYamlValue(value);
-        }
-      }
-    }
+    
+    // Validate and normalize the parsed structure
+    return normalizeBase(parsed);
+  } catch (error) {
+    throw new Error(`Failed to parse YAML: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
-
-  return result as ObsidianBase;
 }
 
 /**
- * Parse an inline filter string
+ * Normalize and validate a parsed base object
  */
-function parseInlineFilter(value: string): Filter {
-  return value.replace(/^["']|["']$/g, '');
-}
-
-/**
- * Parse a YAML value (string, number, boolean)
- */
-function parseYamlValue(value: string): unknown {
-  value = value.trim();
-
-  if (!value) return undefined;
-
-  // Remove quotes
-  if ((value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))) {
-    return value.slice(1, -1);
-  }
-
-  // Boolean
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-
-  // Null
-  if (value === 'null' || value === '~') return null;
-
-  // Number
-  if (/^-?\d+$/.test(value)) return parseInt(value, 10);
-  if (/^-?\d+\.\d+$/.test(value)) return parseFloat(value);
-
-  return value;
-}
-
-/**
- * Parse a multiline YAML value
- */
-function parseMultilineValue(lines: string[], startIndex: number): string {
-  const values: string[] = [];
-  const baseIndent = lines[startIndex].search(/\S/);
-
-  for (let i = startIndex + 1; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    if (!trimmed) continue;
-
-    const indent = line.search(/\S/);
-    if (indent <= baseIndent) break;
-
-    values.push(trimmed);
-  }
-
-  return values.join(' ');
-}
-
-/**
- * Parse a filter block (and, or, not)
- */
-function parseFilterBlock(lines: string[], startIndex: number, operator: string): FilterObject {
-  const result: FilterObject = { [operator]: [] };
-  const baseIndent = lines[startIndex].search(/\S/);
-
-  for (let i = startIndex + 1; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const indent = line.search(/\S/);
-
-    // End of block
-    if (indent <= baseIndent) break;
-
-    // List item (filter expression)
-    if (trimmed.startsWith('- ')) {
-      const value = trimmed.substring(2).trim();
-      (result[operator as keyof FilterObject] as string[]).push(
-        parseYamlValue(value) as string
-      );
-    }
-    // Nested filter object
-    else if (!trimmed.includes(':') || trimmed.endsWith(':')) {
-      const nestedOp = trimmed.replace(':', '');
-      if (['and', 'or', 'not'].includes(nestedOp)) {
-        const nestedBlock = parseFilterBlock(lines, i, nestedOp);
-        (result[operator as keyof FilterObject] as FilterObject[]).push(nestedBlock);
-        i = findBlockEnd(lines, i);
-      }
-    }
-  }
-
-  return result;
-}
-
-/**
- * Parse string array (order property)
- */
-function parseStringArray(lines: string[], startIndex: number): string[] {
-  const result: string[] = [];
-  const baseIndent = lines[startIndex].search(/\S/);
-
-  for (let i = startIndex + 1; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const indent = line.search(/\S/);
-    if (indent <= baseIndent) break;
-
-    if (trimmed.startsWith('- ')) {
-      result.push(parseYamlValue(trimmed.substring(2).trim()) as string);
-    }
-  }
-
-  return result;
-}
-
-/**
- * Parse summaries block
- */
-function parseSummariesBlock(lines: string[], startIndex: number): Record<string, string> {
-  const result: Record<string, string> = {};
-  const baseIndent = lines[startIndex].search(/\S/);
-
-  for (let i = startIndex + 1; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const indent = line.search(/\S/);
-    if (indent <= baseIndent) break;
-
-    const [key, ...valueParts] = trimmed.split(':');
-    const value = valueParts.join(':').trim();
-    result[key] = parseYamlValue(value) as string;
-  }
-
-  return result;
-}
-
-/**
- * Find the end of a YAML block
- */
-function findBlockEnd(lines: string[], startIndex: number): number {
-  const baseIndent = lines[startIndex].search(/\S/);
-
-  for (let i = startIndex + 1; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const indent = line.search(/\S/);
-    if (indent <= baseIndent) {
-      return i - 1;
-    }
-  }
-
-  return lines.length - 1;
-}
-
-/**
- * Find the end of an array
- */
-function findArrayEnd(lines: string[], startIndex: number): number {
-  return findBlockEnd(lines, startIndex);
+function normalizeBase(parsed: Partial<ObsidianBase>): ObsidianBase {
+  // Ensure views is an array
+  const views = Array.isArray(parsed.views) ? parsed.views : [];
+  
+  return {
+    filters: parsed.filters,
+    formulas: parsed.formulas,
+    properties: parsed.properties,
+    summaries: parsed.summaries,
+    views,
+  };
 }
 
 // =============================================================================
@@ -396,7 +132,7 @@ export class ReactiveBaseQuery<T = void> {
     options: ReactiveBaseQueryOptions = {}
   ) {
     // Normalize source to ref
-    this.source = Array.isArray(source) ? ref(source) : source;
+    this.source = Array.isArray(source) ? ref(source) as Ref<BaseSource<T>[]> : source;
 
     // Normalize base to ref
     this.base = 'value' in base ? base : ref(base);
@@ -766,8 +502,7 @@ export class ReactiveBaseQuery<T = void> {
 
       for (const [name, expression] of Object.entries(formulas)) {
         try {
-          const expr = typeof expression === 'string' ? expression : expression.raw;
-          const parser = new Parser(new Lexer(expr).tokenize());
+          const parser = new Parser(new Lexer(expression).tokenize());
           const result = parser.parse();
 
           if (result.success && result.ast) {
@@ -1159,8 +894,956 @@ export function useBaseView<T = void>(
 }
 
 // =============================================================================
+// REACTIVE BASE - Reactive base object with modification methods
+// =============================================================================
+
+import { serializeToYAML } from './obsidian-bases-utils';
+import type {
+  FormulaExpression,
+  SummaryExpression,
+  FilterExpression,
+} from './obsidian-bases-schema';
+
+/**
+ * Reactive base class that wraps an ObsidianBase with modification methods.
+ * All changes are reactive and will automatically trigger re-evaluation in
+ * ReactiveBaseQuery instances that use this base.
+ *
+ * @example
+ * ```typescript
+ * // Create a reactive base
+ * const reactiveBase = createReactiveBase();
+ *
+ * // Add filters dynamically
+ * reactiveBase.addFilter('file.hasTag("task")');
+ *
+ * // Add formulas
+ * reactiveBase.addFormula('days_old', '((now() - file.ctime) / 86400000).round(0)');
+ *
+ * // Add a view
+ * reactiveBase.addTableView('Active Tasks', {
+ *   order: ['file.name', 'formula.days_old'],
+ *   filters: 'status != "done"',
+ * });
+ *
+ * // Convert to YAML
+ * const yaml = reactiveBase.toYAML();
+ *
+ * // Use with reactive query
+ * const query = new ReactiveBaseQuery(source, reactiveBase.ref);
+ * const results = query.getViewResults('Active Tasks');
+ * ```
+ */
+export class ReactiveBase {
+  private base: Ref<ObsidianBase>;
+
+  constructor(initialBase?: ObsidianBase) {
+    this.base = ref(initialBase || { views: [] });
+  }
+
+  /**
+   * Get the reactive ref for use with ReactiveBaseQuery
+   */
+  get ref(): Ref<ObsidianBase> {
+    return this.base;
+  }
+
+  /**
+   * Get the current base value (readonly)
+   */
+  get value(): Readonly<ObsidianBase> {
+    return this.base.value;
+  }
+
+  /**
+   * Replace the entire base configuration
+   */
+  setBase(newBase: ObsidianBase): this {
+    this.base.value = { ...newBase };
+    return this;
+  }
+
+  /**
+   * Load base from YAML string
+   */
+  fromYAML(yamlString: string): this {
+    this.base.value = readBase(yamlString);
+    return this;
+  }
+
+  /**
+   * Convert the base to YAML string
+   */
+  toYAML(): string {
+    return serializeToYAML(this.base.value);
+  }
+
+  // =============================================================================
+  // FILTERS
+  // =============================================================================
+
+  /**
+   * Set global filters (replaces existing)
+   */
+  setFilters(filters: Filter): this {
+    this.base.value = {
+      ...this.base.value,
+      filters,
+    };
+    return this;
+  }
+
+  /**
+   * Add a filter expression (AND with existing)
+   */
+  addFilter(filter: FilterExpression): this {
+    const current = this.base.value.filters;
+
+    if (!current) {
+      this.base.value = {
+        ...this.base.value,
+        filters: filter,
+      };
+    } else if (typeof current === 'string') {
+      this.base.value = {
+        ...this.base.value,
+        filters: {
+          and: [current, filter],
+        },
+      };
+    } else {
+      const existing = current as FilterObject;
+      if (existing.and) {
+        this.base.value = {
+          ...this.base.value,
+          filters: {
+            ...existing,
+            and: [...existing.and, filter],
+          },
+        };
+      } else {
+        this.base.value = {
+          ...this.base.value,
+          filters: {
+            and: [current, filter],
+          },
+        };
+      }
+    }
+
+    return this;
+  }
+
+  /**
+   * Clear all global filters
+   */
+  clearFilters(): this {
+    this.base.value = {
+      ...this.base.value,
+      filters: undefined,
+    };
+    return this;
+  }
+
+  // =============================================================================
+  // FORMULAS
+  // =============================================================================
+
+  /**
+   * Add or update a formula
+   */
+  addFormula(name: string, expression: FormulaExpression): this {
+    this.base.value = {
+      ...this.base.value,
+      formulas: {
+        ...this.base.value.formulas,
+        [name]: expression,
+      },
+    };
+    return this;
+  }
+
+  /**
+   * Remove a formula
+   */
+  removeFormula(name: string): this {
+    if (!this.base.value.formulas) return this;
+
+    const { [name]: removed, ...rest } = this.base.value.formulas;
+    this.base.value = {
+      ...this.base.value,
+      formulas: rest,
+    };
+    return this;
+  }
+
+  /**
+   * Set all formulas (replaces existing)
+   */
+  setFormulas(formulas: Record<string, FormulaExpression>): this {
+    this.base.value = {
+      ...this.base.value,
+      formulas,
+    };
+    return this;
+  }
+
+  /**
+   * Clear all formulas
+   */
+  clearFormulas(): this {
+    this.base.value = {
+      ...this.base.value,
+      formulas: undefined,
+    };
+    return this;
+  }
+
+  // =============================================================================
+  // PROPERTIES
+  // =============================================================================
+
+  /**
+   * Configure a property's display settings
+   */
+  configureProperty(name: string, config: PropertyConfig): this {
+    this.base.value = {
+      ...this.base.value,
+      properties: {
+        ...this.base.value.properties,
+        [name]: config,
+      },
+    };
+    return this;
+  }
+
+  /**
+   * Remove a property configuration
+   */
+  removePropertyConfig(name: string): this {
+    if (!this.base.value.properties) return this;
+
+    const { [name]: removed, ...rest } = this.base.value.properties;
+    this.base.value = {
+      ...this.base.value,
+      properties: rest,
+    };
+    return this;
+  }
+
+  /**
+   * Set all property configurations (replaces existing)
+   */
+  setProperties(properties: Record<string, PropertyConfig>): this {
+    this.base.value = {
+      ...this.base.value,
+      properties,
+    };
+    return this;
+  }
+
+  /**
+   * Clear all property configurations
+   */
+  clearProperties(): this {
+    this.base.value = {
+      ...this.base.value,
+      properties: undefined,
+    };
+    return this;
+  }
+
+  // =============================================================================
+  // SUMMARIES
+  // =============================================================================
+
+  /**
+   * Add or update a custom summary formula
+   */
+  addSummary(name: string, expression: SummaryExpression): this {
+    this.base.value = {
+      ...this.base.value,
+      summaries: {
+        ...this.base.value.summaries,
+        [name]: expression,
+      },
+    };
+    return this;
+  }
+
+  /**
+   * Remove a summary
+   */
+  removeSummary(name: string): this {
+    if (!this.base.value.summaries) return this;
+
+    const { [name]: removed, ...rest } = this.base.value.summaries;
+    this.base.value = {
+      ...this.base.value,
+      summaries: rest,
+    };
+    return this;
+  }
+
+  /**
+   * Set all summaries (replaces existing)
+   */
+  setSummaries(summaries: Record<string, SummaryExpression>): this {
+    this.base.value = {
+      ...this.base.value,
+      summaries,
+    };
+    return this;
+  }
+
+  /**
+   * Clear all summaries
+   */
+  clearSummaries(): this {
+    this.base.value = {
+      ...this.base.value,
+      summaries: undefined,
+    };
+    return this;
+  }
+
+  // =============================================================================
+  // VIEWS
+  // =============================================================================
+
+  /**
+   * Add a view
+   */
+  addView(view: View): this {
+    this.base.value = {
+      ...this.base.value,
+      views: [...this.base.value.views, view],
+    };
+    return this;
+  }
+
+  /**
+   * Add a table view
+   */
+  addTableView(
+    name: string,
+    options: {
+      order?: string[];
+      filters?: Filter;
+      limit?: number;
+      groupBy?: { property: string; direction?: SortDirection };
+      summaries?: Record<string, DefaultSummaryFormula | string>;
+      sort?: SortConfig[];
+      columnSize?: Record<string, number>;
+    } = {}
+  ): this {
+    const view: View = {
+      type: 'table',
+      name,
+      order: options.order,
+      filters: options.filters,
+      limit: options.limit,
+      groupBy: options.groupBy
+        ? { property: options.groupBy.property, direction: options.groupBy.direction || 'ASC' }
+        : undefined,
+      summaries: options.summaries,
+      sort: options.sort,
+      columnSize: options.columnSize,
+    };
+    return this.addView(view);
+  }
+
+  /**
+   * Add a cards view
+   */
+  addCardsView(
+    name: string,
+    options: {
+      order?: string[];
+      filters?: Filter;
+      limit?: number;
+      groupBy?: { property: string; direction?: SortDirection };
+      cardSize?: number;
+      image?: ImageSource;
+      imageFit?: ImageFit;
+      imageAspectRatio?: number;
+    } = {}
+  ): this {
+    const view: View = {
+      type: 'cards',
+      name,
+      order: options.order,
+      filters: options.filters,
+      limit: options.limit,
+      groupBy: options.groupBy
+        ? { property: options.groupBy.property, direction: options.groupBy.direction || 'ASC' }
+        : undefined,
+      cardSize: options.cardSize,
+      image: options.image,
+      imageFit: options.imageFit,
+      imageAspectRatio: options.imageAspectRatio,
+    };
+    return this.addView(view);
+  }
+
+  /**
+   * Add a list view
+   */
+  addListView(
+    name: string,
+    options: {
+      order?: string[];
+      filters?: Filter;
+      limit?: number;
+      groupBy?: { property: string; direction?: SortDirection };
+    } = {}
+  ): this {
+    const view: View = {
+      type: 'list',
+      name,
+      order: options.order,
+      filters: options.filters,
+      limit: options.limit,
+      groupBy: options.groupBy
+        ? { property: options.groupBy.property, direction: options.groupBy.direction || 'ASC' }
+        : undefined,
+    };
+    return this.addView(view);
+  }
+
+  /**
+   * Add a map view
+   */
+  addMapView(
+    name: string,
+    options: {
+      latProperty?: string;
+      lngProperty?: string;
+      titleProperty?: string;
+      filters?: Filter;
+      limit?: number;
+    } = {}
+  ): this {
+    const view: View = {
+      type: 'map',
+      name,
+      filters: options.filters,
+      limit: options.limit,
+      ...(options.latProperty && { latProperty: options.latProperty }),
+      ...(options.lngProperty && { lngProperty: options.lngProperty }),
+      ...(options.titleProperty && { titleProperty: options.titleProperty }),
+    };
+    return this.addView(view);
+  }
+
+  /**
+   * Remove a view by name
+   */
+  removeView(name: string): this {
+    this.base.value = {
+      ...this.base.value,
+      views: this.base.value.views.filter(v => v.name !== name),
+    };
+    return this;
+  }
+
+  /**
+   * Update a view by name
+   */
+  updateView(name: string, updater: (view: View) => View): this {
+    this.base.value = {
+      ...this.base.value,
+      views: this.base.value.views.map(v => v.name === name ? updater({ ...v }) : v),
+    };
+    return this;
+  }
+
+  /**
+   * Get a view by name
+   */
+  getView(name: string): View | undefined {
+    return this.base.value.views.find(v => v.name === name);
+  }
+
+  /**
+   * Set view filters
+   */
+  setViewFilters(viewName: string, filters: Filter): this {
+    return this.updateView(viewName, view => ({
+      ...view,
+      filters,
+    }));
+  }
+
+  /**
+   * Set view order
+   */
+  setViewOrder(viewName: string, order: string[]): this {
+    return this.updateView(viewName, view => ({
+      ...view,
+      order,
+    }));
+  }
+
+  /**
+   * Set view limit
+   */
+  setViewLimit(viewName: string, limit: number | undefined): this {
+    return this.updateView(viewName, view => ({
+      ...view,
+      limit,
+    }));
+  }
+
+  /**
+   * Set view groupBy
+   */
+  setViewGroupBy(viewName: string, groupBy: { property: string; direction: SortDirection } | undefined): this {
+    return this.updateView(viewName, view => ({
+      ...view,
+      groupBy,
+    }));
+  }
+
+  /**
+   * Clear all views
+   */
+  clearViews(): this {
+    this.base.value = {
+      ...this.base.value,
+      views: [],
+    };
+    return this;
+  }
+
+  // =============================================================================
+  // UTILITY METHODS
+  // =============================================================================
+
+  /**
+   * Clone this reactive base
+   */
+  clone(): ReactiveBase {
+    return new ReactiveBase(JSON.parse(JSON.stringify(this.base.value)));
+  }
+
+  /**
+   * Reset to empty base
+   */
+  reset(): this {
+    this.base.value = { views: [] };
+    return this;
+  }
+
+  /**
+   * Get a plain ObsidianBase object (non-reactive copy)
+   */
+  toObject(): ObsidianBase {
+    return JSON.parse(JSON.stringify(this.base.value));
+  }
+}
+
+// =============================================================================
+// USE BASE COMPOSABLE - Unified base management
+// =============================================================================
+
+/**
+ * Options for useBase composable
+ */
+export interface UseBaseOptions<T = void> {
+  /** Initial source data */
+  source?: Ref<BaseSource<T>[]> | BaseSource<T>[];
+  /** Initial base configuration (object or YAML string) */
+  base?: ObsidianBase | string;
+  /** Enable debug logging */
+  debug?: boolean;
+  /** Custom function resolvers */
+  customFunctions?: Record<string, Function>;
+  /** Track changes for hasChanges flag */
+  trackChanges?: boolean;
+}
+
+/**
+ * Return type for useBase composable
+ */
+export interface UseBaseReturn<T = void> {
+  // ========== Base Management ==========
+  /** Reactive base instance */
+  base: ReactiveBase;
+  /** Whether a base is loaded */
+  isLoaded: Ref<boolean>;
+  /** Whether the base has unsaved changes (if trackChanges enabled) */
+  hasChanges: Ref<boolean>;
+  
+  // ========== Load/Save ==========
+  /** Load base from YAML string */
+  load: (yaml: string) => void;
+  /** Load base from ObsidianBase object */
+  loadFromObject: (base: ObsidianBase) => void;
+  /** Save base to YAML string */
+  save: () => string;
+  /** Reset base to empty state */
+  reset: () => void;
+  /** Clone current base */
+  clone: () => ReactiveBase;
+  
+  // ========== Source Data Management ==========
+  /** Reactive source data */
+  source: Ref<BaseSource<T>[]>;
+  /** Replace entire source array */
+  setSource: (newSource: BaseSource<T>[]) => void;
+  /** Add item to source */
+  addItem: (item: BaseSource<T>) => void;
+  /** Remove item from source by id */
+  removeItem: (id: string) => void;
+  /** Update item in source */
+  updateItem: (id: string, updates: Partial<BaseSource<T>>) => void;
+  /** Clear all source items */
+  clearSource: () => void;
+  
+  // ========== Query Access ==========
+  /** Reactive query instance */
+  query: ReactiveBaseQuery<T>;
+  /** Get results for a specific view */
+  getViewResults: (viewName: string) => ComputedRef<ReactiveBaseQueryResult<T>>;
+  /** Get results for all items (global filters only) */
+  getAllResults: () => ComputedRef<ReactiveBaseQueryResult<T>>;
+  /** List of view names */
+  viewNames: ComputedRef<string[]>;
+  /** Force refresh query */
+  refresh: () => void;
+  
+  // ========== View Management ==========
+  /** All views (reactive) */
+  views: ComputedRef<View[]>;
+  /** Add a view */
+  addView: (view: View) => void;
+  /** Remove view by name */
+  removeView: (name: string) => void;
+  /** Get view by name */
+  getView: (name: string) => View | undefined;
+  /** Update view */
+  updateView: (name: string, updater: (view: View) => View) => void;
+  
+  // ========== Formula Management ==========
+  /** All formulas (reactive) */
+  formulas: ComputedRef<Formulas | undefined>;
+  /** Add or update formula */
+  addFormula: (name: string, expression: string) => void;
+  /** Remove formula */
+  removeFormula: (name: string) => void;
+  
+  // ========== Filter Management ==========
+  /** Global filters (reactive) */
+  filters: ComputedRef<Filter | undefined>;
+  /** Set global filters */
+  setFilters: (filters: Filter) => void;
+  /** Add filter (AND with existing) */
+  addFilter: (filter: string) => void;
+  /** Clear all filters */
+  clearFilters: () => void;
+  
+  // ========== Property Management ==========
+  /** All properties (reactive) */
+  properties: ComputedRef<Properties | undefined>;
+  /** Configure property */
+  configureProperty: (name: string, config: PropertyConfig) => void;
+  /** Remove property config */
+  removePropertyConfig: (name: string) => void;
+  
+  // ========== Summary Management ==========
+  /** All summaries (reactive) */
+  summaries: ComputedRef<Summaries | undefined>;
+  /** Add or update summary */
+  addSummary: (name: string, expression: string) => void;
+  /** Remove summary */
+  removeSummary: (name: string) => void;
+  
+  // ========== State & Statistics ==========
+  /** Computed state information */
+  state: ComputedRef<{
+    viewCount: number;
+    formulaCount: number;
+    propertyCount: number;
+    summaryCount: number;
+    itemCount: number;
+    hasFilters: boolean;
+    hasViews: boolean;
+    hasFormulas: boolean;
+  }>;
+}
+
+/**
+ * Unified composable for managing an entire base instance.
+ * 
+ * Provides a complete reactive interface for loading, modifying, saving,
+ * and querying a base configuration with its data.
+ * 
+ * @example
+ * ```typescript
+ * const { 
+ *   base, 
+ *   source, 
+ *   load, 
+ *   save, 
+ *   addView, 
+ *   getViewResults 
+ * } = useBase<Task>({
+ *   source: ref([...]),
+ *   base: yamlString,
+ * });
+ * 
+ * // Load from YAML
+ * load(yamlString);
+ * 
+ * // Modify
+ * base.addFormula('priority_label', 'if(priority == 1, "High", "Low")');
+ * addView({ type: 'table', name: 'Tasks', order: ['file.name'] });
+ * 
+ * // Add data
+ * source.value.push(newTask);
+ * 
+ * // Query
+ * const tasks = getViewResults('Tasks');
+ * 
+ * // Save
+ * const yaml = save();
+ * await writeFile('config.base', yaml);
+ * ```
+ */
+export function useBase<T = void>(options: UseBaseOptions<T> = {}): UseBaseReturn<T> {
+  // Initialize source
+  const source: Ref<BaseSource<T>[]> = Array.isArray(options.source) 
+    ? ref(options.source) as Ref<BaseSource<T>[]>
+    : (options.source as Ref<BaseSource<T>[]>) || ref<BaseSource<T>[]>([]);
+  
+  // Initialize base
+  let initialBase: ObsidianBase;
+  if (typeof options.base === 'string') {
+    initialBase = readBase(options.base);
+  } else if (options.base) {
+    initialBase = options.base;
+  } else {
+    initialBase = { views: [] };
+  }
+  
+  const reactiveBase = new ReactiveBase(initialBase);
+  const isLoaded = ref(!!options.base);
+  const hasChanges = ref(false);
+  
+  // Track changes if enabled
+  if (options.trackChanges) {
+    let initialYaml = serializeToYAML(initialBase);
+    
+    watch(
+      () => reactiveBase.value,
+      () => {
+        const currentYaml = serializeToYAML(reactiveBase.value);
+        hasChanges.value = currentYaml !== initialYaml;
+      },
+      { deep: true }
+    );
+  }
+  
+  // Create query
+  const query = new ReactiveBaseQuery<T>(source, reactiveBase.ref, {
+    debug: options.debug,
+    customFunctions: options.customFunctions,
+  });
+  
+  // Load/Save functions
+  const load = (yaml: string) => {
+    reactiveBase.fromYAML(yaml);
+    isLoaded.value = true;
+    if (options.trackChanges) {
+      hasChanges.value = false;
+    }
+  };
+  
+  const loadFromObject = (base: ObsidianBase) => {
+    reactiveBase.setBase(base);
+    isLoaded.value = true;
+    if (options.trackChanges) {
+      hasChanges.value = false;
+    }
+  };
+  
+  const save = (): string => {
+    const yaml = reactiveBase.toYAML();
+    if (options.trackChanges) {
+      hasChanges.value = false;
+    }
+    return yaml;
+  };
+  
+  const reset = () => {
+    reactiveBase.reset();
+    isLoaded.value = false;
+    if (options.trackChanges) {
+      hasChanges.value = false;
+    }
+  };
+  
+  const clone = () => {
+    return reactiveBase.clone();
+  };
+  
+  // Source management
+  const setSource = (newSource: BaseSource<T>[]) => {
+    source.value = newSource;
+  };
+  
+  const addItem = (item: BaseSource<T>) => {
+    source.value = [...source.value, item];
+  };
+  
+  const removeItem = (id: string) => {
+    source.value = source.value.filter(item => item.id !== id);
+  };
+  
+  const updateItem = (id: string, updates: Partial<BaseSource<T>>) => {
+    const index = source.value.findIndex(item => item.id === id);
+    if (index !== -1) {
+      const updated = [...source.value];
+      updated[index] = { ...updated[index], ...updates } as BaseSource<T>;
+      source.value = updated;
+    }
+  };
+  
+  const clearSource = () => {
+    source.value = [];
+  };
+  
+  // Query access
+  const getViewResults = (viewName: string) => query.getViewResults(viewName);
+  const getAllResults = () => query.getAllResults();
+  const viewNames = query.getViewNames();
+  const refresh = () => query.refresh();
+  
+  // Computed properties
+  const views = computed(() => reactiveBase.value.views);
+  const formulas = computed(() => reactiveBase.value.formulas);
+  const filters = computed(() => reactiveBase.value.filters);
+  const properties = computed(() => reactiveBase.value.properties);
+  const summaries = computed(() => reactiveBase.value.summaries);
+  
+  // State
+  const state = computed(() => ({
+    viewCount: reactiveBase.value.views.length,
+    formulaCount: Object.keys(reactiveBase.value.formulas || {}).length,
+    propertyCount: Object.keys(reactiveBase.value.properties || {}).length,
+    summaryCount: Object.keys(reactiveBase.value.summaries || {}).length,
+    itemCount: source.value.length,
+    hasFilters: !!reactiveBase.value.filters,
+    hasViews: reactiveBase.value.views.length > 0,
+    hasFormulas: Object.keys(reactiveBase.value.formulas || {}).length > 0,
+  }));
+  
+  return {
+    // Base management
+    base: reactiveBase,
+    isLoaded,
+    hasChanges,
+    
+    // Load/Save
+    load,
+    loadFromObject,
+    save,
+    reset,
+    clone,
+    
+    // Source management
+    source,
+    setSource,
+    addItem,
+    removeItem,
+    updateItem,
+    clearSource,
+    
+    // Query access
+    query,
+    getViewResults,
+    getAllResults,
+    viewNames,
+    refresh,
+    
+    // View management
+    views,
+    addView: (view: View) => reactiveBase.addView(view),
+    removeView: (name: string) => reactiveBase.removeView(name),
+    getView: (name: string) => reactiveBase.getView(name),
+    updateView: (name: string, updater: (view: View) => View) => 
+      reactiveBase.updateView(name, updater),
+    
+    // Formula management
+    formulas,
+    addFormula: (name: string, expression: string) => 
+      reactiveBase.addFormula(name, expression),
+    removeFormula: (name: string) => reactiveBase.removeFormula(name),
+    
+    // Filter management
+    filters,
+    setFilters: (filters: Filter) => reactiveBase.setFilters(filters),
+    addFilter: (filter: string) => reactiveBase.addFilter(filter),
+    clearFilters: () => reactiveBase.clearFilters(),
+    
+    // Property management
+    properties,
+    configureProperty: (name: string, config: PropertyConfig) => 
+      reactiveBase.configureProperty(name, config),
+    removePropertyConfig: (name: string) => 
+      reactiveBase.removePropertyConfig(name),
+    
+    // Summary management
+    summaries,
+    addSummary: (name: string, expression: string) => 
+      reactiveBase.addSummary(name, expression),
+    removeSummary: (name: string) => reactiveBase.removeSummary(name),
+    
+    // State
+    state,
+  };
+}
+
+// =============================================================================
 // CONVENIENCE EXPORTS
 // =============================================================================
+
+/**
+ * Create a new reactive base
+ *
+ * @example
+ * ```typescript
+ * const base = createReactiveBase();
+ * base.addFilter('file.hasTag("task")')
+ *     .addFormula('days_old', '((now() - file.ctime) / 86400000).round(0)')
+ *     .addTableView('Tasks', { order: ['file.name'] });
+ * ```
+ */
+export function createReactiveBase(initialBase?: ObsidianBase): ReactiveBase {
+  return new ReactiveBase(initialBase);
+}
+
+/**
+ * Create a reactive base from YAML
+ *
+ * @example
+ * ```typescript
+ * const yaml = `
+ *   filters:
+ *     and:
+ *       - file.hasTag("task")
+ *   views:
+ *     - type: table
+ *       name: "Tasks"
+ * `;
+ * const base = createReactiveBaseFromYAML(yaml);
+ * ```
+ */
+export function createReactiveBaseFromYAML(yamlString: string): ReactiveBase {
+  const base = readBase(yamlString);
+  return new ReactiveBase(base);
+}
 
 /**
  * Create a reactive base query from YAML.

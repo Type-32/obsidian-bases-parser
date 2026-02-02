@@ -22,9 +22,12 @@ import {
   ViewSummaries,
   DefaultSummaryFormula,
   SortDirection,
+  SortConfig,
   FilterExpression,
   FormulaExpression,
   SummaryExpression,
+  ImageFit,
+  ImageSource,
 } from './obsidian-bases-schema';
 
 // =============================================================================
@@ -148,6 +151,8 @@ export class BaseBuilder {
       limit?: number;
       groupBy?: { property: string; direction?: SortDirection };
       summaries?: ViewSummaries;
+      sort?: SortConfig[];
+      columnSize?: Record<string, number>;
     } = {}
   ): this {
     const view: View = {
@@ -160,6 +165,8 @@ export class BaseBuilder {
         ? { property: options.groupBy.property, direction: options.groupBy.direction || 'ASC' }
         : undefined,
       summaries: options.summaries,
+      sort: options.sort,
+      columnSize: options.columnSize,
     };
     return this.addView(view);
   }
@@ -174,6 +181,10 @@ export class BaseBuilder {
       filters?: Filter;
       limit?: number;
       groupBy?: { property: string; direction?: SortDirection };
+      cardSize?: number;
+      image?: ImageSource;
+      imageFit?: ImageFit;
+      imageAspectRatio?: number;
     } = {}
   ): this {
     const view: View = {
@@ -185,6 +196,10 @@ export class BaseBuilder {
       groupBy: options.groupBy
         ? { property: options.groupBy.property, direction: options.groupBy.direction || 'ASC' }
         : undefined,
+      cardSize: options.cardSize,
+      image: options.image,
+      imageFit: options.imageFit,
+      imageAspectRatio: options.imageAspectRatio,
     };
     return this.addView(view);
   }
@@ -626,153 +641,49 @@ export function normalizePropertyPath(
 // YAML SERIALIZATION
 // =============================================================================
 
+import * as yaml from 'js-yaml';
+
 /**
- * Serialize a base to YAML string
+ * Serialize a base to YAML string using js-yaml
  */
 export function serializeToYAML(base: ObsidianBase): string {
-  const lines: string[] = [];
-
-  // Serialize filters
-  if (base.filters) {
-    lines.push('filters:');
-    lines.push(...serializeFilter(base.filters, 1));
-  }
-
-  // Serialize formulas
-  if (base.formulas && Object.keys(base.formulas).length > 0) {
-    lines.push('formulas:');
-    for (const [name, expr] of Object.entries(base.formulas)) {
-      lines.push(`  ${name}: ${quoteIfNeeded(expr)}`);
+  try {
+    // Create a clean object for serialization
+    const cleanBase: Partial<ObsidianBase> = {};
+    
+    // Only include properties that have values
+    if (base.filters) {
+      cleanBase.filters = base.filters;
     }
-  }
-
-  // Serialize properties
-  if (base.properties && Object.keys(base.properties).length > 0) {
-    lines.push('properties:');
-    for (const [name, config] of Object.entries(base.properties)) {
-      lines.push(`  ${name}:`);
-      if (config.displayName) {
-        lines.push(`    displayName: ${quoteIfNeeded(config.displayName)}`);
-      }
+    
+    if (base.formulas && Object.keys(base.formulas).length > 0) {
+      cleanBase.formulas = base.formulas;
     }
-  }
-
-  // Serialize summaries
-  if (base.summaries && Object.keys(base.summaries).length > 0) {
-    lines.push('summaries:');
-    for (const [name, expr] of Object.entries(base.summaries)) {
-      lines.push(`  ${name}: ${quoteIfNeeded(expr)}`);
+    
+    if (base.properties && Object.keys(base.properties).length > 0) {
+      cleanBase.properties = base.properties;
     }
-  }
-
-  // Serialize views
-  if (base.views.length > 0) {
-    lines.push('views:');
-    for (const view of base.views) {
-      lines.push(...serializeView(view, 1));
+    
+    if (base.summaries && Object.keys(base.summaries).length > 0) {
+      cleanBase.summaries = base.summaries;
     }
-  }
-
-  return lines.join('\n');
-}
-
-/**
- * Serialize a filter to YAML lines
- */
-function serializeFilter(filter: Filter, indent: number): string[] {
-  const spaces = '  '.repeat(indent);
-
-  if (typeof filter === 'string') {
-    return [`${spaces}- ${quoteIfNeeded(filter)}`];
-  }
-
-  const lines: string[] = [];
-
-  if (filter.and) {
-    lines.push(`${spaces}and:`);
-    for (const f of filter.and) {
-      lines.push(...serializeFilter(f, indent + 1));
+    
+    if (base.views && base.views.length > 0) {
+      cleanBase.views = base.views;
     }
+    
+    // Serialize using js-yaml with nice formatting
+    return yaml.dump(cleanBase, {
+      indent: 2,
+      lineWidth: -1, // Don't wrap lines
+      noRefs: true,  // Don't use YAML references
+      sortKeys: false, // Preserve key order
+      quotingType: '"', // Use double quotes
+      forceQuotes: false, // Only quote when necessary
+    });
+  } catch (error) {
+    throw new Error(`Failed to serialize to YAML: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
-
-  if (filter.or) {
-    lines.push(`${spaces}or:`);
-    for (const f of filter.or) {
-      lines.push(...serializeFilter(f, indent + 1));
-    }
-  }
-
-  if (filter.not) {
-    lines.push(`${spaces}not:`);
-    for (const f of filter.not) {
-      lines.push(...serializeFilter(f, indent + 1));
-    }
-  }
-
-  return lines;
-}
-
-/**
- * Serialize a view to YAML lines
- */
-function serializeView(view: View, indent: number): string[] {
-  const spaces = '  '.repeat(indent);
-  const lines: string[] = [];
-
-  lines.push(`${spaces}- type: ${view.type}`);
-  lines.push(`${spaces}  name: ${quoteIfNeeded(view.name)}`);
-
-  if (view.limit !== undefined) {
-    lines.push(`${spaces}  limit: ${view.limit}`);
-  }
-
-  if (view.groupBy) {
-    lines.push(`${spaces}  groupBy:`);
-    lines.push(`${spaces}    property: ${view.groupBy.property}`);
-    lines.push(`${spaces}    direction: ${view.groupBy.direction}`);
-  }
-
-  if (view.filters) {
-    lines.push(`${spaces}  filters:`);
-    lines.push(...serializeFilter(view.filters, indent + 2).map((l, i) =>
-      i === 0 ? l.replace(/^\s+/, `${spaces}  `) : l
-    ));
-  }
-
-  if (view.order && view.order.length > 0) {
-    lines.push(`${spaces}  order:`);
-    for (const prop of view.order) {
-      lines.push(`${spaces}    - ${prop}`);
-    }
-  }
-
-  if (view.summaries && Object.keys(view.summaries).length > 0) {
-    lines.push(`${spaces}  summaries:`);
-    for (const [prop, summary] of Object.entries(view.summaries)) {
-      lines.push(`${spaces}    ${prop}: ${summary}`);
-    }
-  }
-
-  return lines;
-}
-
-/**
- * Quote a string if it contains special characters
- */
-function quoteIfNeeded(str: string): string {
-  // Check if string needs quoting
-  if (/^[a-zA-Z0-9_]+$/.test(str)) {
-    return str;
-  }
-
-  // Check if string contains double quotes
-  if (str.includes('"')) {
-    // Use single quotes
-    return `'${str}'`;
-  }
-
-  // Use double quotes
-  return `"${str}"`;
 }
 
 // =============================================================================

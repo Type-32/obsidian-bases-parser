@@ -20,13 +20,28 @@ This package provides:
 ## Installation
 
 ```bash
-# Copy the files to your project
-cp obsidian-bases-schema.ts obsidian-bases-parser.ts obsidian-bases-utils.ts obsidian-bases-example.ts index.ts your-project/
+# Using npm
+npm install @type32/obsidian-bases-parser
+
+# Using yarn
+yarn add @type32/obsidian-bases-parser
+
+# Using pnpm
+pnpm add @type32/obsidian-bases-parser
+
+# Using bun
+bun add @type32/obsidian-bases-parser
 ```
+
+### Dependencies
+
+This package requires:
+- `vue` ^3.5.27 - For reactive system
+- `js-yaml` ^4.1.1 - For efficient YAML parsing and serialization
 
 ## Quick Start
 
-### Creating a Base
+### Creating a Base (Static)
 
 ```typescript
 import { createBase, PresetFilters, PresetFormulas } from './index';
@@ -40,6 +55,28 @@ const myBase = createBase()
     filters: PresetFilters.byStatus('active'),
   })
   .build();
+```
+
+### Creating a Reactive Base (Recommended)
+
+```typescript
+import { createReactiveBase, PresetFilters, PresetFormulas } from './index';
+
+const myBase = createReactiveBase()
+  .addFilter(PresetFilters.byTag('project'))
+  .addFormula('days_old', PresetFormulas.daysOld())
+  .addFormula('status_icon', PresetFormulas.statusIcon())
+  .addTableView('Active Projects', {
+    order: ['file.name', 'status', 'formula.status_icon'],
+    filters: PresetFilters.byStatus('active'),
+  });
+
+// Can be modified later!
+myBase.addFormula('priority_label', PresetFormulas.priorityLabel());
+myBase.setViewOrder('Active Projects', ['formula.priority_label', 'file.name']);
+
+// Convert to YAML
+const yaml = myBase.toYAML();
 ```
 
 ### Parsing and Evaluating Filters
@@ -103,6 +140,8 @@ console.log(yaml);
 // ...
 ```
 
+**Note:** YAML parsing and serialization is powered by `js-yaml` for robust, efficient, and standards-compliant handling of YAML files.
+
 ## Schema Overview
 
 ### Filter System
@@ -146,8 +185,38 @@ const tableView: TableView = {
   filters: { and: ['status != "done"'] },
   groupBy: { property: 'status', direction: 'ASC' },
   summaries: { priority: 'Average' },
+  sort: [
+    { property: 'file.name', direction: 'ASC' },
+    { property: 'due', direction: 'DESC' },
+  ],
+  columnSize: {
+    'file.name': 300,
+    'status': 150,
+  },
+};
+
+const cardsView: CardsView = {
+  type: 'cards',
+  name: 'Project Cards',
+  order: ['priority', 'file.name'],
+  cardSize: 250,
+  image: 'cover',
+  imageFit: 'cover',
+  imageAspectRatio: 1.4,
 };
 ```
+
+#### Extended View Properties
+
+**Table Views:**
+- `sort` - Separate sorting configuration (different from display order)
+- `columnSize` - Column width configuration (property name to width in pixels)
+
+**Cards Views:**
+- `cardSize` - Card dimensions in pixels
+- `image` - Image source (`'cover'`, `'first'`, or property name)
+- `imageFit` - Image fitting mode (`'cover'`, `'contain'`, `'fill'`, or `''`)
+- `imageAspectRatio` - Image aspect ratio (number)
 
 ### Formula System
 
@@ -308,16 +377,20 @@ console.log(serializeToYAML(taskBase));
 ## File Structure
 
 ```
-obsidian-bases/
-├── index.ts                    # Main exports
-├── obsidian-bases-schema.ts    # Type definitions
-├── obsidian-bases-parser.ts    # Lexer, parser, evaluator
-├── obsidian-bases-utils.ts     # Builders, presets, serialization
-├── obsidian-bases-reactive.ts  # Reactive query system (Vue)
-├── obsidian-bases-example.ts   # Usage examples
-├── llms.txt                    # LLM overview
-├── llms-full.txt               # Complete LLM documentation
-└── README.md                   # This file
+obsidian-bases-parser/
+├── src/
+│   ├── index.ts                    # Main exports
+│   ├── obsidian-bases-schema.ts    # Type definitions
+│   ├── obsidian-bases-parser.ts    # Lexer, parser, evaluator
+│   ├── obsidian-bases-utils.ts     # Builders, presets, serialization
+│   ├── obsidian-bases-reactive.ts  # Reactive system (Vue + ReactiveBase)
+│   └── obsidian-bases-example.ts   # Usage examples
+├── examples/
+│   ├── reactive-base-example.ts    # Comprehensive reactive base examples
+│   └── simple-reactive-demo.ts     # Simple demonstration
+├── llms.txt                        # LLM overview
+├── llms-full.txt                   # Complete LLM documentation
+└── README.md                       # This file
 ```
 
 ## API Reference
@@ -397,15 +470,236 @@ When you parse a filter expression using `parseFilterExpression()`, you get a `F
 | `serializeToYAML()` | Convert base to YAML |
 | `readBase()` | Parse YAML string into ObsidianBase |
 
-### Reactive Query (Vue Integration)
+### Reactive System (Vue Integration)
 
 | Class/Function | Description |
 |----------------|-------------|
+| `ReactiveBase` | Reactive base object with modification methods |
 | `ReactiveBaseQuery` | Reactive query class with automatic re-evaluation |
+| `useBase()` | **Unified composable for complete base management** |
 | `useBaseQuery()` | Vue composable for reactive queries |
 | `useBaseView()` | Vue composable for single view queries |
+| `createReactiveBase()` | Create a new ReactiveBase instance |
+| `createReactiveBaseFromYAML()` | Create a ReactiveBase from YAML string |
 | `createBaseQuery()` | Create a ReactiveBaseQuery instance |
 | `createBaseQueryFromYAML()` | Create a query from YAML string |
+
+## Reactive Query System
+
+The reactive query system integrates with Vue's reactivity system to provide automatic updates when source data changes.
+
+### Reactive Base Object
+
+The `ReactiveBase` class provides a reactive, modifiable base configuration with methods to adjust filters, views, formulas, and more in real-time.
+
+```typescript
+import { createReactiveBase, ReactiveBaseQuery } from './index';
+
+// Create a reactive base
+const base = createReactiveBase();
+
+// Add filters dynamically
+base.addFilter('file.hasTag("task")');
+base.addFilter('status != "done"');
+
+// Add formulas
+base.addFormula('days_old', '((now() - file.ctime) / 86400000).round(0)');
+
+// Add views
+base.addTableView('Active Tasks', {
+  order: ['file.name', 'formula.days_old'],
+  filters: 'priority > 2',
+});
+
+// Use with reactive query
+const query = new ReactiveBaseQuery(source, base.ref);
+const results = query.getViewResults('Active Tasks');
+
+// Modify the base - results automatically update!
+base.setViewFilters('Active Tasks', 'priority > 1');
+base.addFormula('priority_label', 'if(priority == 1, "High", "Low")');
+base.setViewOrder('Active Tasks', ['formula.priority_label', 'file.name']);
+
+// Convert to YAML for saving
+const yaml = base.toYAML();
+```
+
+### ReactiveBase API
+
+The `ReactiveBase` class provides comprehensive methods for modifying base configurations:
+
+#### Filters
+- `setFilters(filters)` - Replace all global filters
+- `addFilter(expression)` - Add a filter (AND with existing)
+- `clearFilters()` - Remove all global filters
+
+#### Formulas
+- `addFormula(name, expression)` - Add or update a formula
+- `removeFormula(name)` - Remove a formula
+- `setFormulas(formulas)` - Replace all formulas
+- `clearFormulas()` - Remove all formulas
+
+#### Properties
+- `configureProperty(name, config)` - Configure property display settings
+- `removePropertyConfig(name)` - Remove property configuration
+- `setProperties(properties)` - Replace all property configurations
+- `clearProperties()` - Remove all property configurations
+
+#### Summaries
+- `addSummary(name, expression)` - Add or update a custom summary
+- `removeSummary(name)` - Remove a summary
+- `setSummaries(summaries)` - Replace all summaries
+- `clearSummaries()` - Remove all summaries
+
+#### Views
+- `addView(view)` - Add a view
+- `addTableView(name, options)` - Add a table view
+- `addCardsView(name, options)` - Add a cards view
+- `addListView(name, options)` - Add a list view
+- `addMapView(name, options)` - Add a map view
+- `removeView(name)` - Remove a view by name
+- `updateView(name, updater)` - Update a view by name
+- `getView(name)` - Get a view configuration
+- `setViewFilters(viewName, filters)` - Update view filters
+- `setViewOrder(viewName, order)` - Update view order
+- `setViewLimit(viewName, limit)` - Update view limit
+- `setViewGroupBy(viewName, groupBy)` - Update view grouping
+- `clearViews()` - Remove all views
+
+#### Utility Methods
+- `toYAML()` - Convert to YAML string
+- `fromYAML(yaml)` - Load from YAML string
+- `clone()` - Create a copy of the base
+- `reset()` - Reset to empty base
+- `toObject()` - Get plain object (non-reactive copy)
+
+### Dynamic Base Modifications
+
+The key advantage of `ReactiveBase` is that all modifications are reactive and automatically propagate to any `ReactiveBaseQuery` instances using it:
+
+```typescript
+import { ref } from 'vue';
+import { createReactiveBase, ReactiveBaseQuery, BaseSource } from './index';
+
+const source = ref<BaseSource[]>([/* your data */]);
+const base = createReactiveBase();
+
+// Initial setup
+base.addFilter('file.hasTag("project")')
+    .addTableView('Projects', { order: ['file.name'] });
+
+// Create query
+const query = new ReactiveBaseQuery(source, base.ref);
+const results = query.getViewResults('Projects');
+
+// Later: Add a new formula
+base.addFormula('status_icon', 'if(status == "done", "✅", "⏳")');
+
+// Update view to use new formula
+base.setViewOrder('Projects', ['formula.status_icon', 'file.name']);
+
+// Results automatically update with new formula and ordering!
+console.log(results.value.items);
+
+// Later: Change filters
+base.clearFilters();
+base.addFilter('file.hasTag("active-project")');
+
+// Results automatically re-filter!
+console.log(results.value.items);
+```
+
+### Loading from YAML
+
+You can create a reactive base from existing YAML:
+
+```typescript
+import { createReactiveBaseFromYAML } from './index';
+
+const yaml = `
+filters:
+  and:
+    - file.hasTag("task")
+formulas:
+  days_old: '((now() - file.ctime) / 86400000).round(0)'
+views:
+  - type: table
+    name: "Tasks"
+    order:
+      - file.name
+`;
+
+const base = createReactiveBaseFromYAML(yaml);
+
+// Now modify it
+base.addFormula('priority_label', 'if(priority == 1, "High", "Low")');
+base.addTableView('High Priority', {
+  filters: 'priority == 1',
+  order: ['file.name'],
+});
+
+// Save back to YAML
+const updatedYaml = base.toYAML();
+```
+
+### Builder Pattern vs Reactive Base
+
+#### Static Builder (Old Approach)
+
+```typescript
+import { createBase } from './index';
+
+// Build once
+const base = createBase()
+  .addFilter('file.hasTag("task")')
+  .addFormula('days_old', '((now() - file.ctime) / 86400000).round(0)')
+  .addTableView('Tasks', { order: ['file.name'] })
+  .build(); // Returns a plain object
+
+// ❌ Cannot modify after build
+// You would need to rebuild from scratch
+
+// Use with query
+const query = new ReactiveBaseQuery(source, base);
+```
+
+#### Reactive Base (New Approach)
+
+```typescript
+import { createReactiveBase } from './index';
+
+// Create reactive base
+const base = createReactiveBase()
+  .addFilter('file.hasTag("task")')
+  .addFormula('days_old', '((now() - file.ctime) / 86400000).round(0)')
+  .addTableView('Tasks', { order: ['file.name'] });
+// No .build() needed - stays reactive!
+
+// ✅ Can modify anytime
+base.addFormula('priority_label', 'if(priority == 1, "High", "Low")');
+base.setViewOrder('Tasks', ['formula.priority_label', 'file.name']);
+
+// Use with query - changes propagate automatically
+const query = new ReactiveBaseQuery(source, base.ref);
+const results = query.getViewResults('Tasks');
+
+// Modifications automatically update results!
+base.setViewFilters('Tasks', 'status != "done"');
+console.log(results.value.items); // Automatically filtered!
+```
+
+#### Key Differences
+
+| Feature | Static Builder | Reactive Base |
+|---------|---------------|---------------|
+| Modification | ❌ Immutable after `.build()` | ✅ Fully mutable |
+| Reactivity | ❌ No automatic updates | ✅ Automatic updates |
+| YAML Export | ✅ Via `serializeToYAML()` | ✅ Via `.toYAML()` |
+| YAML Import | ✅ Via `readBase()` | ✅ Via `.fromYAML()` |
+| Use Case | Static configurations | Dynamic, real-time updates |
+| Return Type | Plain `ObsidianBase` object | `ReactiveBase` instance |
+
+**Recommendation:** Use `ReactiveBase` when you need dynamic configuration changes, especially in interactive applications. Use the static builder when you have fixed configurations that won't change.
 
 ## Reactive Query System
 
@@ -519,6 +813,107 @@ function addTask() {
 }
 </script>
 ```
+
+### useBase() - Unified Base Management
+
+The `useBase()` composable provides a complete, unified interface for managing an entire base instance reactively. It combines base configuration, source data management, and querying into one convenient API.
+
+```typescript
+import { ref } from 'vue';
+import { useBase, BaseSource } from './index';
+
+interface Task {
+  title: string;
+  description: string;
+}
+
+const {
+  // Base & State
+  base,
+  isLoaded,
+  hasChanges,
+  state,
+  
+  // Load/Save
+  load,
+  save,
+  
+  // Source Management
+  source,
+  addItem,
+  updateItem,
+  removeItem,
+  
+  // Query Access
+  getViewResults,
+  viewNames,
+  
+  // Shortcuts
+  addView,
+  addFormula,
+  setFilters,
+} = useBase<Task>({
+  source: ref([]),
+  trackChanges: true,
+});
+
+// Load from YAML
+load(yamlString);
+
+// Modify base
+addFormula('priority_label', 'if(priority == 1, "High", "Low")');
+addView({ type: 'table', name: 'Tasks', order: ['file.name'] });
+
+// Add data
+addItem({
+  id: '1',
+  name: 'Task.md',
+  properties: { status: 'todo' },
+  data: { title: 'My Task', description: 'Details' },
+});
+
+// Query
+const tasks = getViewResults('Tasks');
+console.log(tasks.value.items);
+
+// Save
+const yaml = save();
+```
+
+#### Features
+
+- **Unified API** - One composable for everything
+- **Reactive** - All changes propagate automatically
+- **Change Tracking** - Know when there are unsaved changes
+- **Source Management** - CRUD operations on source data
+- **Full Query Access** - All reactive query features
+- **Load/Save** - YAML import/export
+- **State & Statistics** - View counts, item counts, etc.
+
+#### Auto-save Pattern
+
+```typescript
+const { save, hasChanges } = useBase({
+  base: yamlString,
+  trackChanges: true,
+});
+
+// Implement auto-save with debouncing
+let saveTimeout: NodeJS.Timeout | null = null;
+
+watch(hasChanges, (changed) => {
+  if (changed) {
+    if (saveTimeout) clearTimeout(saveTimeout);
+    
+    saveTimeout = setTimeout(async () => {
+      const yaml = save();
+      await writeFile('config.base', yaml);
+    }, 1000); // Save after 1s of no changes
+  }
+});
+```
+
+See `examples/use-base-example.ts` and `examples/use-base-vue-component.vue` for complete examples.
 
 ### Using ReactiveBaseQuery Class
 

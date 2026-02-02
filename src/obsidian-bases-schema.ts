@@ -143,6 +143,26 @@ export type ArithmeticOperator = '+' | '-' | '*' | '/' | '%';
 export type SortDirection = 'ASC' | 'DESC';
 
 /**
+ * Sort configuration for a property
+ */
+export interface SortConfig {
+  /** Property to sort by */
+  property: string;
+  /** Sort direction */
+  direction: SortDirection;
+}
+
+/**
+ * Image fit modes for cards/gallery views
+ */
+export type ImageFit = 'cover' | 'contain' | 'fill' | '';
+
+/**
+ * Image source for cards/gallery views
+ */
+export type ImageSource = 'cover' | 'first' | string;
+
+/**
  * View types supported by Obsidian Bases
  */
 export type ViewType = 'table' | 'cards' | 'list' | 'map';
@@ -455,6 +475,8 @@ export interface BaseView {
   filters?: Filter;
   /** Properties to display in order */
   order?: string[];
+  /** Optional: sort configuration (separate from display order) */
+  sort?: SortConfig[];
   /** Optional: summary formulas mapped to properties */
   summaries?: ViewSummaries;
 }
@@ -464,6 +486,8 @@ export interface BaseView {
  */
 export interface TableView extends BaseView {
   type: 'table';
+  /** Optional: column size configuration (property name to width in pixels) */
+  columnSize?: Record<string, number>;
 }
 
 /**
@@ -471,6 +495,14 @@ export interface TableView extends BaseView {
  */
 export interface CardsView extends BaseView {
   type: 'cards';
+  /** Optional: card size in pixels */
+  cardSize?: number;
+  /** Optional: image source property or preset */
+  image?: ImageSource;
+  /** Optional: image fit mode */
+  imageFit?: ImageFit;
+  /** Optional: image aspect ratio */
+  imageAspectRatio?: number;
 }
 
 /**
