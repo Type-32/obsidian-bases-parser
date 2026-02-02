@@ -120,7 +120,7 @@ export const readingListBase = createBase()
     or(
       'file.hasTag("book")',
       'file.hasTag("article")'
-    )
+    ).build()
   )
   .addFormula('reading_time', 'if(pages, (pages * 2).toString() + " min", "")')
   .addFormula('status_icon', 'if(status == "reading", "📖", if(status == "done", "✅", "📚"))')
@@ -130,11 +130,11 @@ export const readingListBase = createBase()
   .configureProperty('formula.reading_time', { displayName: 'Est. Time' })
   .addCardsView('Library', {
     order: ['cover', 'file.name', 'author', 'formula.status_icon'],
-    filters: not('status == "dropped"'),
+    filters: not('status == "dropped"').build(),
   })
   .addTableView('Reading List', {
     order: ['file.name', 'author', 'pages', 'formula.reading_time'],
-    filters: and('status == "to-read"'),
+    filters: and('status == "to-read"').build(),
   })
   .build();
 
@@ -147,7 +147,7 @@ export const projectNotesBase = createBase()
     and(
       PresetFilters.inFolder('Projects'),
       PresetFilters.byExtension('md')
-    )
+    ).build()
   )
   .addFormula('last_updated', PresetFormulas.lastModified())
   .addFormula('link_count', PresetFormulas.linkCount())
@@ -271,7 +271,11 @@ if (filterExp.noteProperties.includes('status')) {
 
 // Access comparison operations
 for (const comparison of filterExp.comparisons) {
-  console.log(`Comparison: ${comparison.left.name} ${comparison.operator} ${comparison.right.raw}`);
+  const leftName = 'name' in comparison.left ? comparison.left.name : 
+                   'raw' in comparison.left ? comparison.left.raw : String(comparison.left);
+  const rightValue = 'raw' in comparison.right ? comparison.right.raw :
+                     'name' in comparison.right ? comparison.right.name : String(comparison.right);
+  console.log(`Comparison: ${leftName} ${comparison.operator} ${rightValue}`);
   // Output: "status == reading"
 }
 

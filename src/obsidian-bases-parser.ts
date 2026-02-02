@@ -161,7 +161,7 @@ export class Lexer {
         }
 
         // Check for keywords
-        let type = pattern.type;
+        let type: TokenType = pattern.type;
         if (type === TokenType.IDENTIFIER && KEYWORDS[value]) {
           type = KEYWORDS[value];
         }
@@ -638,7 +638,7 @@ export class FilterObjectParser {
       return parser.parse();
     } else {
       // Filter object with and/or/not
-      return this.parseFilterObject(filter);
+      return this.parseFilterObject(filter as FilterObject);
     }
   }
 
@@ -898,8 +898,8 @@ export class Evaluator {
     else if (typeof value === 'number') type = RuntimeValueType.NUMBER;
     else if (typeof value === 'boolean') type = RuntimeValueType.BOOLEAN;
     else if (value === null) type = RuntimeValueType.NULL;
-    else if (value instanceof Date) type = RuntimeValueType.DATE;
-    else if (value instanceof RegExp) type = RuntimeValueType.OBJECT;
+    else if (typeof value === 'object' && value instanceof Date) type = RuntimeValueType.DATE;
+    else if (typeof value === 'object' && value instanceof RegExp) type = RuntimeValueType.OBJECT;
     else type = RuntimeValueType.UNDEFINED;
 
     return { type, value };
@@ -938,7 +938,7 @@ export class Evaluator {
       return { type: RuntimeValueType.UNDEFINED, value: undefined };
     }
 
-    const value = (this.context.file as Record<string, unknown>)[name];
+    const value = (this.context.file as unknown as Record<string, unknown>)[name];
     return this.wrapValue(value);
   }
 
@@ -974,7 +974,7 @@ export class Evaluator {
       return { type: RuntimeValueType.UNDEFINED, value: undefined };
     }
 
-    const value = (this.context.this as Record<string, unknown>)[name];
+    const value = (this.context.this as unknown as Record<string, unknown>)[name];
     return this.wrapValue(value);
   }
 
@@ -1291,7 +1291,7 @@ export class Validator {
     if (typeof filter === 'string') {
       this.validateExpression(filter, 'filter');
     } else {
-      this.validateFilterObject(filter, 'filter');
+      this.validateFilterObject(filter as FilterObject, 'filter');
     }
 
     return {
@@ -1349,7 +1349,7 @@ export class Validator {
         if (typeof filter === 'string') {
           this.validateExpression(filter, `${path}.and[${i}]`);
         } else {
-          this.validateFilterObject(filter, `${path}.and[${i}]`);
+          this.validateFilterObject(filter as FilterObject, `${path}.and[${i}]`);
         }
       }
     }
@@ -1360,7 +1360,7 @@ export class Validator {
         if (typeof filter === 'string') {
           this.validateExpression(filter, `${path}.or[${i}]`);
         } else {
-          this.validateFilterObject(filter, `${path}.or[${i}]`);
+          this.validateFilterObject(filter as FilterObject, `${path}.or[${i}]`);
         }
       }
     }
@@ -1371,7 +1371,7 @@ export class Validator {
         if (typeof filter === 'string') {
           this.validateExpression(filter, `${path}.not[${i}]`);
         } else {
-          this.validateFilterObject(filter, `${path}.not[${i}]`);
+          this.validateFilterObject(filter as FilterObject, `${path}.not[${i}]`);
         }
       }
     }
@@ -1573,7 +1573,7 @@ class FilterExpressionExtractor {
       type = 'boolean';
     } else if (node.value === null) {
       type = 'null';
-    } else if (node.value instanceof RegExp) {
+    } else if (typeof node.value === 'object' && node.value instanceof RegExp) {
       type = 'regexp';
     } else {
       type = 'string';

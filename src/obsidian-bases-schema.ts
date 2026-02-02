@@ -588,6 +588,7 @@ export enum TokenType {
   RBRACKET = 'RBRACKET',
   DOT = 'DOT',
   COMMA = 'COMMA',
+  COLON = 'COLON',
 
   // Functions
   FUNCTION = 'FUNCTION',
@@ -643,7 +644,7 @@ export interface ASTNode {
  */
 export interface LiteralNode extends ASTNode {
   type: ASTNodeType.LITERAL;
-  value: string | number | boolean | null;
+  value: string | number | boolean | null | RegExp;
   raw: string;
 }
 
