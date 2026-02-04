@@ -1,6 +1,6 @@
 {
     "name": "@type32/obsidian-bases-parser",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "description": "A complete TypeScript implementation for Obsidian Bases (.base files) including schema definitions, lexer, parser, evaluator, and reactive query system with Vue integration.",
     "main": "./dist/index.js",
     "module": "./dist/index.mjs",
