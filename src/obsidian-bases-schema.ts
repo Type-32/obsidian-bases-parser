@@ -816,6 +816,10 @@ export interface ExecutionContext {
   note?: Record<string, unknown>;
   /** Formula properties */
   formula?: Record<string, RuntimeValue>;
+  /** Current index (for array callbacks) */
+  index?: number;
+  /** Current array (for array callbacks) */
+  array?: unknown[];
   /** The 'this' reference */
   this?: FileContext;
   /** Available functions */

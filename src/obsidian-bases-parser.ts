@@ -1110,7 +1110,7 @@ export class Evaluator {
    * Evaluate a function call expression
    */
   private evaluateCallExpression(node: CallExpressionNode): RuntimeValue {
-    let func: Function;
+    let func: Function | undefined;
     let thisArg: unknown = undefined;
 
     if (node.callee.type === ASTNodeType.IDENTIFIER) {
