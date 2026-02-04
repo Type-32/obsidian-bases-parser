@@ -911,20 +911,37 @@ export class Evaluator {
   private evaluateIdentifier(node: IdentifierNode): RuntimeValue {
     const { prefix, name } = node;
 
+    // Check if this is a dynamic context variable (e.g., callback parameter)
+    // Check this FIRST, even before prefix-based lookups, because dynamic variables
+    // should take precedence over note/file properties
+    if (name in this.context) {
+      const contextValue = (this.context as Record<string, unknown>)[name];
+      // Only use it if it's not one of the standard context properties
+      if (!['file', 'note', 'formula', 'functions'].includes(name)) {
+        return this.wrapValue(contextValue);
+      }
+    }
+
     switch (prefix) {
       case 'file':
         return this.getFileProperty(name);
       case 'note':
-        return this.getNoteProperty(name);
+        // Try note properties first, then fall back to file
+        // This allows properties like 'tags' to work even with 'note' prefix
+        const noteValue = this.getNoteProperty(name);
+        if (noteValue.type !== RuntimeValueType.UNDEFINED) {
+          return noteValue;
+        }
+        return this.getFileProperty(name);
       case 'formula':
         return this.getFormulaProperty(name);
       case 'this':
         return this.getThisProperty(name);
       default:
         // Try note properties first, then fall back to file
-        const noteValue = this.getNoteProperty(name);
-        if (noteValue.type !== RuntimeValueType.UNDEFINED) {
-          return noteValue;
+        const defaultNoteValue = this.getNoteProperty(name);
+        if (defaultNoteValue.type !== RuntimeValueType.UNDEFINED) {
+          return defaultNoteValue;
         }
         return this.getFileProperty(name);
     }
@@ -947,6 +964,12 @@ export class Evaluator {
    */
   private getNoteProperty(name: string): RuntimeValue {
     if (!this.context.note) {
+      return { type: RuntimeValueType.UNDEFINED, value: undefined };
+    }
+
+    // Only return the value if it actually exists in note properties
+    // This allows falling through to file properties for properties like "tags"
+    if (!(name in this.context.note)) {
       return { type: RuntimeValueType.UNDEFINED, value: undefined };
     }
 
@@ -1098,31 +1121,42 @@ export class Evaluator {
         throw new Error(`Unknown function: ${name}`);
       }
     } else if (node.callee.type === ASTNodeType.MEMBER_EXPRESSION) {
-      // Method call like file.hasTag("tag")
+      // Method call like file.hasTag("tag") or tags.filter(callback)
       const memberExpr = node.callee as MemberExpressionNode;
       const object = this.evaluate(memberExpr.object);
       const methodName = memberExpr.property.name;
 
-      // Handle special file methods
-      if (object.type === RuntimeValueType.FILE || memberExpr.object.type === ASTNodeType.IDENTIFIER) {
-        const idNode = memberExpr.object.type === ASTNodeType.IDENTIFIER
-          ? memberExpr.object as IdentifierNode
-          : null;
+      // Check if this is an array method with callback
+      if (Array.isArray(object.value) && this.isArrayCallbackMethod(methodName)) {
+        return this.evaluateArrayCallbackMethod(object.value, methodName, node.arguments);
+      }
 
-        if (idNode?.prefix === 'file' || idNode?.name === 'file') {
-          func = this.getFileMethod(methodName);
-          thisArg = this.context.file;
-        } else {
+      // Try to get a built-in method for the value type
+      func = this.getBuiltInMethod(object.value, methodName);
+      thisArg = object.value;
+
+      // If no built-in method found, handle special cases
+      if (!func) {
+        if (object.type === RuntimeValueType.FILE || memberExpr.object.type === ASTNodeType.IDENTIFIER) {
+          const idNode = memberExpr.object.type === ASTNodeType.IDENTIFIER
+            ? memberExpr.object as IdentifierNode
+            : null;
+
+          if (idNode?.prefix === 'file' || idNode?.name === 'file') {
+            func = this.getFileMethod(methodName);
+            thisArg = this.context.file;
+          } else if (object.value && typeof object.value === 'object') {
+            func = (object.value as Record<string, Function>)[methodName];
+            thisArg = object.value;
+          }
+        } else if (object.value && typeof object.value === 'object') {
           func = (object.value as Record<string, Function>)[methodName];
           thisArg = object.value;
         }
-      } else {
-        func = (object.value as Record<string, Function>)[methodName];
-        thisArg = object.value;
       }
 
       if (!func) {
-        throw new Error(`Unknown method: ${methodName}`);
+        throw new Error(`Unknown method: ${methodName} on ${typeof object.value}`);
       }
     } else {
       throw new Error('Invalid callee type for function call');
@@ -1132,6 +1166,235 @@ export class Evaluator {
     const result = func.apply(thisArg, args);
 
     return this.wrapValue(result);
+  }
+
+  /**
+   * Check if a method is an array method that takes a callback
+   */
+  private isArrayCallbackMethod(methodName: string): boolean {
+    return [
+      'filter', 'map', 'find', 'findIndex', 'some', 'every',
+      'forEach', 'reduce', 'reduceRight', 'flatMap'
+    ].includes(methodName);
+  }
+
+  /**
+   * Evaluate an array method call with a callback expression
+   */
+  private evaluateArrayCallbackMethod(
+    array: unknown[],
+    methodName: string,
+    args: ASTNode[]
+  ): RuntimeValue {
+    if (args.length === 0) {
+      throw new Error(`${methodName} requires at least one argument`);
+    }
+
+    const callbackExpr = args[0];
+    
+    // Extract the callback parameter name from the expression
+    // For expressions like "value.containsAny('x')", we extract "value"
+    const parameterName = this.extractCallbackParameterName(callbackExpr);
+
+    // Create the callback function
+    const callback = (element: unknown, index: number, arr: unknown[]) => {
+      // Save the current context
+      const savedContext = { ...this.context };
+      
+      // Create a new context with the callback parameter
+      const callbackContext: ExecutionContext = {
+        ...this.context,
+        [parameterName]: element,
+        index,
+        array: arr
+      };
+      
+      this.context = callbackContext;
+      
+      try {
+        const result = this.evaluate(callbackExpr);
+        return result.value;
+      } finally {
+        // Restore the original context
+        this.context = savedContext;
+      }
+    };
+
+    // Handle additional arguments (like initialValue for reduce)
+    const additionalArgs = args.slice(1).map(arg => this.evaluate(arg).value);
+
+    // Call the array method
+    let result: unknown;
+    switch (methodName) {
+      case 'filter':
+        result = array.filter(callback);
+        break;
+      case 'map':
+        result = array.map(callback);
+        break;
+      case 'find':
+        result = array.find(callback);
+        break;
+      case 'findIndex':
+        result = array.findIndex(callback);
+        break;
+      case 'some':
+        result = array.some(callback);
+        break;
+      case 'every':
+        result = array.every(callback);
+        break;
+      case 'forEach':
+        array.forEach(callback);
+        result = undefined;
+        break;
+      case 'reduce':
+        result = additionalArgs.length > 0
+          ? array.reduce(callback as any, additionalArgs[0])
+          : array.reduce(callback as any);
+        break;
+      case 'reduceRight':
+        result = additionalArgs.length > 0
+          ? array.reduceRight(callback as any, additionalArgs[0])
+          : array.reduceRight(callback as any);
+        break;
+      case 'flatMap':
+        result = array.flatMap(callback);
+        break;
+      default:
+        throw new Error(`Unsupported array method: ${methodName}`);
+    }
+
+    return this.wrapValue(result);
+  }
+
+  /**
+   * Extract the parameter name from a callback expression
+   * For "value.containsAny('x')", returns "value"
+   * For "item => item.prop", returns "item"
+   */
+  private extractCallbackParameterName(expr: ASTNode): string {
+    // Default parameter name
+    let paramName = 'value';
+
+    // Try to extract from the expression
+    if (expr.type === ASTNodeType.MEMBER_EXPRESSION) {
+      const memberExpr = expr as MemberExpressionNode;
+      if (memberExpr.object.type === ASTNodeType.IDENTIFIER) {
+        const identifier = memberExpr.object as IdentifierNode;
+        paramName = identifier.name;
+      }
+    } else if (expr.type === ASTNodeType.IDENTIFIER) {
+      const identifier = expr as IdentifierNode;
+      paramName = identifier.name;
+    } else if (expr.type === ASTNodeType.CALL_EXPRESSION) {
+      const callExpr = expr as CallExpressionNode;
+      if (callExpr.callee.type === ASTNodeType.MEMBER_EXPRESSION) {
+        const memberExpr = callExpr.callee as MemberExpressionNode;
+        if (memberExpr.object.type === ASTNodeType.IDENTIFIER) {
+          const identifier = memberExpr.object as IdentifierNode;
+          paramName = identifier.name;
+        }
+      }
+    }
+
+    return paramName;
+  }
+
+  /**
+   * Get a built-in method for primitive types (string, array, etc.)
+   */
+  private getBuiltInMethod(value: unknown, methodName: string): Function | undefined {
+    // String methods
+    if (typeof value === 'string') {
+      const stringMethods: Record<string, Function> = {
+        contains: function(this: string, substring: string) { return this.includes(substring); },
+        containsAny: function(this: string, ...substrings: string[]) { 
+          return substrings.some(sub => this.includes(sub));
+        },
+        containsAll: function(this: string, ...substrings: string[]) { 
+          return substrings.every(sub => this.includes(sub));
+        },
+        startsWith: function(this: string, prefix: string) { return this.startsWith(prefix); },
+        endsWith: function(this: string, suffix: string) { return this.endsWith(suffix); },
+        toLowerCase: function(this: string) { return this.toLowerCase(); },
+        toUpperCase: function(this: string) { return this.toUpperCase(); },
+        trim: function(this: string) { return this.trim(); },
+        match: function(this: string, pattern: string | RegExp) {
+          const regex = typeof pattern === 'string' ? new RegExp(pattern) : pattern;
+          return regex.test(this);
+        },
+        replace: function(this: string, search: string | RegExp, replacement: string) { 
+          return this.replace(search, replacement);
+        },
+        split: function(this: string, separator: string) { return this.split(separator); },
+        substring: function(this: string, start: number, end?: number) { return this.substring(start, end); },
+        substr: function(this: string, start: number, length?: number) { return this.substr(start, length); },
+        slice: function(this: string, start: number, end?: number) { return this.slice(start, end); },
+        length: function(this: string) { return this.length; },
+      };
+      
+      return stringMethods[methodName];
+    }
+
+    // Array methods (non-callback ones)
+    if (Array.isArray(value)) {
+      const arrayMethods: Record<string, Function> = {
+        includes: function(this: unknown[], item: unknown) { return this.includes(item); },
+        indexOf: function(this: unknown[], item: unknown) { return this.indexOf(item); },
+        lastIndexOf: function(this: unknown[], item: unknown) { return this.lastIndexOf(item); },
+        join: function(this: unknown[], separator?: string) { return this.join(separator); },
+        slice: function(this: unknown[], start?: number, end?: number) { return this.slice(start, end); },
+        concat: function(this: unknown[], ...items: unknown[]) { return this.concat(...items); },
+        reverse: function(this: unknown[]) { return [...this].reverse(); }, // Non-mutating
+        sort: function(this: unknown[]) { return [...this].sort(); }, // Non-mutating
+        flat: function(this: unknown[], depth?: number) { return this.flat(depth); },
+        length: function(this: unknown[]) { return this.length; },
+        containsAny: function(this: unknown[], ...items: unknown[]) {
+          return items.some(item => this.includes(item));
+        },
+        containsAll: function(this: unknown[], ...items: unknown[]) {
+          return items.every(item => this.includes(item));
+        },
+      };
+      
+      return arrayMethods[methodName];
+    }
+
+    // Number methods
+    if (typeof value === 'number') {
+      const numberMethods: Record<string, Function> = {
+        toFixed: function(this: number, digits?: number) { return this.toFixed(digits); },
+        toPrecision: function(this: number, precision?: number) { return this.toPrecision(precision); },
+        toExponential: function(this: number, fractionDigits?: number) { return this.toExponential(fractionDigits); },
+        toString: function(this: number, radix?: number) { return this.toString(radix); },
+      };
+      
+      return numberMethods[methodName];
+    }
+
+    // Date methods
+    if (value instanceof Date) {
+      const dateMethods: Record<string, Function> = {
+        getTime: function(this: Date) { return this.getTime(); },
+        getFullYear: function(this: Date) { return this.getFullYear(); },
+        getMonth: function(this: Date) { return this.getMonth(); },
+        getDate: function(this: Date) { return this.getDate(); },
+        getDay: function(this: Date) { return this.getDay(); },
+        getHours: function(this: Date) { return this.getHours(); },
+        getMinutes: function(this: Date) { return this.getMinutes(); },
+        getSeconds: function(this: Date) { return this.getSeconds(); },
+        toISOString: function(this: Date) { return this.toISOString(); },
+        toDateString: function(this: Date) { return this.toDateString(); },
+        toTimeString: function(this: Date) { return this.toTimeString(); },
+        toLocaleDateString: function(this: Date, ...args: unknown[]) { return this.toLocaleDateString(...args as any); },
+        toLocaleTimeString: function(this: Date, ...args: unknown[]) { return this.toLocaleTimeString(...args as any); },
+      };
+      
+      return dateMethods[methodName];
+    }
+
+    return undefined;
   }
 
   /**
