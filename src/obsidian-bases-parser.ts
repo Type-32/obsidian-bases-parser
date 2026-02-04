@@ -1350,6 +1350,7 @@ export class Evaluator {
         sort: function(this: unknown[]) { return [...this].sort(); }, // Non-mutating
         flat: function(this: unknown[], depth?: number) { return this.flat(depth); },
         length: function(this: unknown[]) { return this.length; },
+        toString: function(this: unknown[]) { return this.toString(); },
         containsAny: function(this: unknown[], ...items: unknown[]) {
           return items.some(item => this.includes(item));
         },
@@ -1392,6 +1393,18 @@ export class Evaluator {
       };
       
       return dateMethods[methodName];
+    }
+
+    // RegExp methods
+    if (value instanceof RegExp) {
+      const regexpMethods: Record<string, Function> = {
+        test: function(this: RegExp, str: string) { return this.test(str); },
+        matches: function(this: RegExp, str: string) { return this.test(str); },
+        exec: function(this: RegExp, str: string) { return this.exec(str); },
+        toString: function(this: RegExp) { return this.toString(); },
+      };
+      
+      return regexpMethods[methodName];
     }
 
     return undefined;
