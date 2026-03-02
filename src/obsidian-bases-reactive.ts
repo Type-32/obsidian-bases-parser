@@ -1729,8 +1729,11 @@ export function useBase<T = void>(options: UseBaseOptions<T> = {}): UseBaseRetur
   if (options.trackChanges) {
     let initialYaml = serializeToYAML(initialBase);
     
+    // Watch the ref directly so that replace-by-assignment (e.g. addViewOrder,
+    // updateView) triggers the watcher. A getter () => reactiveBase.value can
+    // miss updates when the ref's value is replaced rather than mutated.
     watch(
-      () => reactiveBase.value,
+      reactiveBase.ref,
       () => {
         const currentYaml = serializeToYAML(reactiveBase.value);
         hasChanges.value = currentYaml !== initialYaml;
