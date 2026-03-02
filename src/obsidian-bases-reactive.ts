@@ -1439,6 +1439,39 @@ export class ReactiveBase {
   }
 
   /**
+   * Append a property to the end of a view's order array.
+   * Does nothing if the property is already present.
+   *
+   * @example
+   * ```typescript
+   * base.addViewOrder('Tasks', 'formula.priority_label');
+   * ```
+   */
+  addViewOrder(viewName: string, property: string): this {
+    return this.updateView(viewName, view => {
+      const current = view.order ?? [];
+      if (current.includes(property)) return view;
+      return { ...view, order: [...current, property] };
+    });
+  }
+
+  /**
+   * Remove a property from a view's order array.
+   * Does nothing if the property is not present.
+   *
+   * @example
+   * ```typescript
+   * base.removeViewOrder('Tasks', 'formula.priority_label');
+   * ```
+   */
+  removeViewOrder(viewName: string, property: string): this {
+    return this.updateView(viewName, view => ({
+      ...view,
+      order: (view.order ?? []).filter(p => p !== property),
+    }));
+  }
+
+  /**
    * Set view limit
    */
   setViewLimit(viewName: string, limit: number | undefined): this {
@@ -1581,6 +1614,10 @@ export interface UseBaseReturn<T = void> {
   patchView: (name: string, patch: ViewPatch) => void;
   /** Update view via callback */
   updateView: (name: string, updater: (view: View) => View) => void;
+  /** Append a property to a view's order array (no-op if already present) */
+  addViewOrder: (name: string, property: string) => void;
+  /** Remove a property from a view's order array (no-op if not present) */
+  removeViewOrder: (name: string, property: string) => void;
   
   // ========== Formula Management ==========
   /** All formulas (reactive) */
@@ -1831,8 +1868,10 @@ export function useBase<T = void>(options: UseBaseOptions<T> = {}): UseBaseRetur
     getView: (name: string) => reactiveBase.getView(name),
     setView: (name: string, view: View) => reactiveBase.setView(name, view),
     patchView: (name: string, patch: ViewPatch) => reactiveBase.patchView(name, patch),
-    updateView: (name: string, updater: (view: View) => View) => 
+    updateView: (name: string, updater: (view: View) => View) =>
       reactiveBase.updateView(name, updater),
+    addViewOrder: (name: string, property: string) => reactiveBase.addViewOrder(name, property),
+    removeViewOrder: (name: string, property: string) => reactiveBase.removeViewOrder(name, property),
     
     // Formula management
     formulas,
