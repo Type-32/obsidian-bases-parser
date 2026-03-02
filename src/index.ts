@@ -37,6 +37,7 @@ export {
   type ExpressionType,
   type ImageFit,
   type ImageSource,
+  type ViewPatch,
 
   // Property types
   type PropertyPrefix,

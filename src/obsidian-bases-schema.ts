@@ -530,6 +530,36 @@ export interface MapView extends BaseView {
  */
 export type View = TableView | CardsView | ListView | MapView;
 
+/**
+ * Partial view properties for patching an existing view.
+ *
+ * Covers every optional field across all view types. Pass only the fields
+ * you want to change — everything else is left untouched.
+ *
+ * @example
+ * ```typescript
+ * // Only update the order and limit; leave everything else as-is
+ * base.patchView('My Table', { order: ['file.name', 'status'], limit: 50 });
+ *
+ * // Update cards-specific props
+ * base.patchView('My Cards', { cardSize: 300, imageFit: 'contain' });
+ * ```
+ */
+export type ViewPatch = Partial<Omit<BaseView, 'type' | 'name'>> &
+  Partial<{
+    // TableView
+    columnSize: Record<string, number>;
+    // CardsView
+    cardSize: number;
+    image: ImageSource;
+    imageFit: ImageFit;
+    imageAspectRatio: number;
+    // MapView
+    latProperty: string;
+    lngProperty: string;
+    titleProperty: string;
+  }>;
+
 // =============================================================================
 // BASE FILE SCHEMA
 // =============================================================================

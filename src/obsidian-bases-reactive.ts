@@ -17,6 +17,7 @@ import {
 import {
   ObsidianBase,
   View,
+  ViewPatch,
   Filter,
   FilterExpObject,
   FilterObject,
@@ -1366,6 +1367,58 @@ export class ReactiveBase {
   }
 
   /**
+   * Hard-replace (upsert) a view by name.
+   *
+   * If a view with `name` already exists it is fully replaced by `view`.
+   * If no view with that name exists the new view is appended, making this
+   * a safe upsert — no need to call `removeView` first.
+   *
+   * @example
+   * ```typescript
+   * base.setView('Tasks', {
+   *   type: 'table',
+   *   name: 'Tasks',
+   *   order: ['file.name', 'status'],
+   *   filters: 'status != "done"',
+   *   groupBy: { property: 'status', direction: 'ASC' },
+   * });
+   * ```
+   */
+  setView(name: string, view: View): this {
+    const exists = this.base.value.views.some(v => v.name === name);
+    this.base.value = {
+      ...this.base.value,
+      views: exists
+        ? this.base.value.views.map(v => (v.name === name ? view : v))
+        : [...this.base.value.views, view],
+    };
+    return this;
+  }
+
+  /**
+   * Partially update (patch) a view by name.
+   *
+   * Only the fields you provide are changed — everything else is preserved.
+   * Accepts any combination of base-view fields and view-type-specific fields.
+   * Does nothing silently if no view with `name` exists.
+   *
+   * @example
+   * ```typescript
+   * // Change only the order and limit
+   * base.patchView('Tasks', { order: ['file.name', 'due'], limit: 20 });
+   *
+   * // Update cards-specific props without touching filters or order
+   * base.patchView('My Cards', { cardSize: 300, imageFit: 'contain' });
+   *
+   * // Clear groupBy while leaving everything else intact
+   * base.patchView('Tasks', { groupBy: undefined });
+   * ```
+   */
+  patchView(name: string, patch: ViewPatch): this {
+    return this.updateView(name, view => ({ ...view, ...patch }));
+  }
+
+  /**
    * Set view filters
    */
   setViewFilters(viewName: string, filters: Filter): this {
@@ -1522,7 +1575,11 @@ export interface UseBaseReturn<T = void> {
   removeView: (name: string) => void;
   /** Get view by name */
   getView: (name: string) => View | undefined;
-  /** Update view */
+  /** Hard-replace (upsert) a view by name — replaces the full view object */
+  setView: (name: string, view: View) => void;
+  /** Partially update a view by name — merges only the supplied fields */
+  patchView: (name: string, patch: ViewPatch) => void;
+  /** Update view via callback */
   updateView: (name: string, updater: (view: View) => View) => void;
   
   // ========== Formula Management ==========
@@ -1772,6 +1829,8 @@ export function useBase<T = void>(options: UseBaseOptions<T> = {}): UseBaseRetur
     addView: (view: View) => reactiveBase.addView(view),
     removeView: (name: string) => reactiveBase.removeView(name),
     getView: (name: string) => reactiveBase.getView(name),
+    setView: (name: string, view: View) => reactiveBase.setView(name, view),
+    patchView: (name: string, patch: ViewPatch) => reactiveBase.patchView(name, patch),
     updateView: (name: string, updater: (view: View) => View) => 
       reactiveBase.updateView(name, updater),
     
