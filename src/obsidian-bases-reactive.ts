@@ -1472,6 +1472,50 @@ export class ReactiveBase {
   }
 
   /**
+   * Set view sort configuration (replaces existing).
+   */
+  setViewSort(viewName: string, sort: SortConfig[]): this {
+    return this.updateView(viewName, view => ({
+      ...view,
+      sort,
+    }));
+  }
+
+  /**
+   * Append a sort entry to a view's sort array.
+   * If the property already exists, updates its direction.
+   *
+   * @example
+   * ```typescript
+   * base.addViewSort('Tasks', 'file.name', 'ASC');
+   * base.addViewSort('Tasks', 'due', 'DESC');
+   * ```
+   */
+  addViewSort(viewName: string, property: string, direction: SortDirection = 'ASC'): this {
+    return this.updateView(viewName, view => {
+      const current = view.sort ?? [];
+      const filtered = current.filter(s => s.property !== property);
+      return { ...view, sort: [...filtered, { property, direction }] };
+    });
+  }
+
+  /**
+   * Remove a sort entry from a view's sort array by property.
+   * Does nothing if the property is not present.
+   *
+   * @example
+   * ```typescript
+   * base.removeViewSort('Tasks', 'due');
+   * ```
+   */
+  removeViewSort(viewName: string, property: string): this {
+    return this.updateView(viewName, view => ({
+      ...view,
+      sort: (view.sort ?? []).filter(s => s.property !== property),
+    }));
+  }
+
+  /**
    * Set view limit
    */
   setViewLimit(viewName: string, limit: number | undefined): this {
@@ -1618,6 +1662,12 @@ export interface UseBaseReturn<T = void> {
   addViewOrder: (name: string, property: string) => void;
   /** Remove a property from a view's order array (no-op if not present) */
   removeViewOrder: (name: string, property: string) => void;
+  /** Set view sort configuration (replaces existing) */
+  setViewSort: (name: string, sort: SortConfig[]) => void;
+  /** Append a sort entry to a view's sort array (updates direction if property exists) */
+  addViewSort: (name: string, property: string, direction?: SortDirection) => void;
+  /** Remove a sort entry from a view's sort array by property (no-op if not present) */
+  removeViewSort: (name: string, property: string) => void;
   
   // ========== Formula Management ==========
   /** All formulas (reactive) */
@@ -1875,6 +1925,10 @@ export function useBase<T = void>(options: UseBaseOptions<T> = {}): UseBaseRetur
       reactiveBase.updateView(name, updater),
     addViewOrder: (name: string, property: string) => reactiveBase.addViewOrder(name, property),
     removeViewOrder: (name: string, property: string) => reactiveBase.removeViewOrder(name, property),
+    setViewSort: (name: string, sort: SortConfig[]) => reactiveBase.setViewSort(name, sort),
+    addViewSort: (name: string, property: string, direction?: SortDirection) =>
+      reactiveBase.addViewSort(name, property, direction ?? 'ASC'),
+    removeViewSort: (name: string, property: string) => reactiveBase.removeViewSort(name, property),
     
     // Formula management
     formulas,
