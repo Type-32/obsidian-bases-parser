@@ -267,8 +267,11 @@ export class ReactiveBaseQuery<T = void> {
       // Apply formulas
       items = this.applyFormulas(items);
 
-      // Apply sorting (from order property)
-      if (view?.order) {
+      // Apply sorting: use sort config when present (per-property direction),
+      // otherwise fall back to order (ASC by default)
+      if (view?.sort && view.sort.length > 0) {
+        items = this.applySort(items, view.sort);
+      } else if (view?.order && view.order.length > 0) {
         items = this.applyOrder(items, view.order);
       }
 
@@ -529,15 +532,26 @@ export class ReactiveBaseQuery<T = void> {
   }
 
   /**
-   * Apply ordering to items
+   * Apply ordering to items (ASC by default for all properties)
    */
   private applyOrder(items: BaseSource<T>[], order: string[]): BaseSource<T>[] {
-    return [...items].sort((a, b) => {
-      for (const prop of order) {
-        const aVal = this.getPropertyValue(a, prop);
-        const bVal = this.getPropertyValue(b, prop);
+    return this.applySort(
+      items,
+      order.map(property => ({ property, direction: 'ASC' as SortDirection }))
+    );
+  }
 
-        const comparison = this.compareValues(aVal, bVal);
+  /**
+   * Apply sorting with per-property direction (from view.sort)
+   */
+  private applySort(items: BaseSource<T>[], sortConfig: SortConfig[]): BaseSource<T>[] {
+    return [...items].sort((a, b) => {
+      for (const { property, direction } of sortConfig) {
+        const aVal = this.getPropertyValue(a, property);
+        const bVal = this.getPropertyValue(b, property);
+
+        let comparison = this.compareValues(aVal, bVal);
+        if (direction === 'DESC') comparison = -comparison;
         if (comparison !== 0) return comparison;
       }
       return 0;
@@ -1502,6 +1516,7 @@ export class ReactiveBase {
   /**
    * Remove a sort entry from a view's sort array by property.
    * Does nothing if the property is not present.
+   * Sets sort to undefined when the last entry is removed.
    *
    * @example
    * ```typescript
@@ -1509,10 +1524,10 @@ export class ReactiveBase {
    * ```
    */
   removeViewSort(viewName: string, property: string): this {
-    return this.updateView(viewName, view => ({
-      ...view,
-      sort: (view.sort ?? []).filter(s => s.property !== property),
-    }));
+    return this.updateView(viewName, view => {
+      const filtered = (view.sort ?? []).filter(s => s.property !== property);
+      return { ...view, sort: filtered.length > 0 ? filtered : undefined };
+    });
   }
 
   /**
